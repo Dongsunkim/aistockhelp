@@ -42,6 +42,10 @@ input,select,button{min-height:46px} .quality-panel{margin-bottom:18px;border-le
 .decision-card[data-tone="watch"]{border-top-color:var(--blue)}
 .loading-state:not([hidden]){display:flex;align-items:center;gap:18px;margin-bottom:18px}
 .loading-state p{margin:5px 0 0;color:var(--sub)}
+.analysis-progress{padding:12px 14px;margin:12px 0;border-radius:8px;background:#eef5fb;color:#315979;line-height:1.65;overflow-wrap:anywhere}
+.analysis-progress[data-state="error"]{background:#fff4ef;color:#a04d3d}
+.decision-card[data-tone="hold"]{border-top-color:#91a4b5}
+.mini-qa input:disabled,.mini-qa button:disabled{opacity:.65;cursor:wait}
 .loading-indicator{width:28px;height:28px;border:3px solid #dce8f2;border-top-color:var(--blue);border-radius:50%;flex-shrink:0;animation:loading-spin 1s linear infinite}
 @keyframes loading-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.loading-indicator{animation:none}}

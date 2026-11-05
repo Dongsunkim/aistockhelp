@@ -4,13 +4,13 @@
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="color-scheme" content="light"/>
   <title>매수 구간 연구소 | 보수적인 주식 가격 알림 비서</title>
-  <link rel="stylesheet" href="/static/style.css"/>
+  <link rel="stylesheet" href="/static/style.css?v=043"/>
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
       <div class="brand"><div class="logo">S<span>•</span></div><div><strong>SignalDesk</strong><small>나만의 보수적 투자 리서치 비서</small></div></div>
-      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">TIMING v0.4.2</span></div>
+      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">TIMING v0.4.3</span></div>
     </header>
     <main>
       <section class="hero">
@@ -40,13 +40,14 @@
 
       <section class="card loading-state" id="loading-state" role="status" hidden>
         <div class="loading-indicator" aria-hidden="true"></div>
-        <div><strong id="loading-name"></strong><p>차트·재무·기사·공시를 함께 확인하고 있습니다.</p></div>
+        <div><strong id="loading-name"></strong><p id="loading-detail">확정 일봉을 먼저 계산하고, 나머지 자료를 함께 확인합니다.</p></div>
       </section>
       <div id="result-area" hidden>
         <section class="card decision-card" id="decision-card" aria-live="polite">
           <p class="decision-company" id="decision-company"></p>
           <span class="decision-label" id="decision-label"></span>
           <h2 id="decision-headline"></h2>
+          <p class="analysis-progress" id="analysis-progress" role="status" hidden></p>
           <ul class="decision-reasons" id="decision-reasons"></ul>
           <div class="decision-next"><strong>다시 확인할 때</strong><p id="decision-next"></p></div>
           <div class="decision-sources" id="decision-sources" aria-label="판단에 사용한 자료 확인 상태"></div>
@@ -120,12 +121,12 @@
       </section>
       </details>
       <section class="card watchlist-panel"><div class="section-heading"><div><div class="eyebrow">PERSONAL WATCHLIST</div><h3>저장한 관심 종목</h3></div><button class="text-btn" id="refresh-watch" type="button">새로고침 ↻</button></div><div id="watchlist-items" class="watch-items"><div class="subtle">저장된 종목을 불러오는 중…</div></div></section>
-      <footer>로그인 없는 공개 연구·학습용 프로토타입 · 비공식 시세는 지연 또는 오류가 발생할 수 있습니다. 미래에셋증권 계좌 접근 및 주문 기능은 포함하지 않습니다.<br/>© SignalDesk v0.4.2 · 투자손실 책임은 투자자에게 있으며 과거 기술적 신호는 미래 수익을 보장하지 않습니다.</footer>
+      <footer>로그인 없는 공개 연구·학습용 프로토타입 · 비공식 시세는 지연 또는 오류가 발생할 수 있습니다. 미래에셋증권 계좌 접근 및 주문 기능은 포함하지 않습니다.<br/>© SignalDesk v0.4.3 · 투자손실 책임은 투자자에게 있으며 과거 기술적 신호는 미래 수익을 보장하지 않습니다.</footer>
     </main>
   </div>
-  <script defer src="/static/decision.js?v=042"></script>
-  <script defer src="/static/app.js?v=042"></script>
-  <script defer src="/static/qa.js?v=042"></script>
+  <script defer src="/static/decision.js?v=043"></script>
+  <script defer src="/static/app.js?v=043"></script>
+  <script defer src="/static/qa.js?v=043"></script>
   <script defer src="/static/dart.js?v=1"></script>
 </body>
 </html>

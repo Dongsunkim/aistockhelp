@@ -31,49 +31,114 @@ function clearMessage(){el('app-message').hidden=true;}
 async function api(path,method='GET',body,signal){if(cloudMode && path.startsWith('/api/watchlist'))return localWatch(path,method,body);const headers={'Content-Type':'application/json'};const rsp=await fetch(path,{method,headers,signal,body:body?JSON.stringify(body):undefined});let payload;try{payload=await rsp.json()}catch{throw new Error('서버 응답을 읽지 못했습니다.')}if(!rsp.ok)throw new Error(payload.detail||`서버 오류 ${rsp.status}`);return payload;}
 async function health(){try{const r=await api('/api/health');const c=r.configured;cloudMode=!!r.serverless;el('watch-help').textContent=cloudMode?'관심 종목은 현재 브라우저에만 저장됩니다. 자동 알림은 아직 연결되지 않았습니다.':'관심 종목과 관찰 가격을 저장할 수 있습니다. 자동 알림은 아직 연결되지 않았습니다.';el('setup-state').textContent=`연동 상태 · DART ${c.dart?'설정됨':'키 필요'} / KIS 시세 ${c.kis_quote?'설정됨':'미연결'} / SEC ${c.sec?'설정됨':'식별 정보 필요'} / AI 요약 ${c.ai?'로컬 전용':'공개 앱 비활성'} / 텔레그램 ${c.telegram?'설정됨':'설정 필요'} · 기술분석은 확정 일봉이며 추가 REST 시세는 최신성 검증이 필요합니다.`;}catch(e){el('setup-state').textContent='연동 상태를 확인할 수 없습니다.';}}
 function setSelection(market,symbol,name){el('market').value=market;el('symbol').value=symbol;el('company-name').value=name;}
+const ANALYSIS_SOURCES={news:'기사',research:'리서치',filings:'공시',financials:'재무',quote:'현재가',macro:'미국 경제'};
+const DECISION_SOURCES=['news','filings','financials','macro'];
+async function streamAnalysis(body,signal,onUpdate){
+  const response=await fetch('/api/analyze/stream',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify(body),signal});
+  if(signal.aborted){const error=new Error('분석 요청이 변경되었습니다.');error.name='AbortError';throw error;}
+  if(response.status===404 || response.status===405){
+    const result=await api('/api/analyze','POST',body,signal);
+    onUpdate({stage:'complete',result,pending_sources:[]});
+    return;
+  }
+  if(!response.ok){
+    let detail;try{detail=(await response.json()).detail;}catch{}
+    throw new Error(typeof detail==='string'?detail:`분석 서버에 연결하지 못했습니다. (${response.status})`);
+  }
+  if(!response.body?.getReader)throw new Error('분석 연결을 읽지 못했습니다. 다시 분석해 주세요.');
+  const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
+  let buffer='',complete=false;
+  const consume=line=>{
+    if(!line.trim())return;
+    let update;try{update=JSON.parse(line);}catch{throw new Error('분석 응답을 읽지 못했습니다. 다시 분석해 주세요.');}
+    if(update?.stage==='error')throw new Error(typeof update.detail==='string'?update.detail:'분석을 완료하지 못했습니다. 다시 분석해 주세요.');
+    if(!update || !['partial','complete'].includes(update.stage) || !update.result || !Array.isArray(update.pending_sources) || update.pending_sources.some(source=>!Object.hasOwn(ANALYSIS_SOURCES,source)) || (update.stage==='complete' && update.pending_sources.length))throw new Error('분석 응답 형식이 올바르지 않습니다. 다시 분석해 주세요.');
+    onUpdate(update);
+    complete=update.stage==='complete';
+  };
+  try{
+    while(!complete){
+      const chunk=await reader.read();
+      if(signal.aborted){const error=new Error('분석 요청이 변경되었습니다.');error.name='AbortError';throw error;}
+      buffer+=decoder.decode(chunk.value,{stream:!chunk.done});
+      let newline;
+      while(!complete && (newline=buffer.indexOf('\n'))!==-1){const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);consume(line);}
+      if(chunk.done){if(!complete && buffer.trim())consume(buffer);break;}
+    }
+    if(!complete)throw new Error('분석 연결이 끊겼습니다. 다시 분석해 주세요.');
+  }finally{
+    try{await reader.cancel();}catch{}
+    reader.releaseLock();
+  }
+}
 async function runAnalyze(){
   clearMessage();
   const market=el('market').value,symbol=el('symbol').value.trim().toUpperCase(),name=el('company-name').value.trim();
   if(!symbol){say('종목코드를 입력하세요.',true);return;}
   const request=++analysisRequest;
   analysisController?.abort();
-  analysisController=new AbortController();
+  const controller=analysisController=new AbortController();
   current=null;
   if(typeof resetStockQA==='function')resetStockQA(null);
   el('backtest-result').textContent='검증을 실행하면 과거 거래 건수·승률·수익률과 가정을 확인할 수 있습니다.';
-  el('backtest-button').disabled=false;
+  el('backtest-button').disabled=true;
   el('backtest-button').textContent='최근 3년 기술적 전략 검증';
   el('result-area').hidden=true;
   el('empty-state').hidden=true;
   el('loading-state').hidden=false;
   el('loading-name').textContent=(name||symbol)+' 분석 중';
+  el('loading-detail').textContent='확정 일봉을 먼저 계산하고, 재무·기사·공시·미국 경제를 함께 확인합니다.';
+  el('analysis-progress').hidden=true;
+  el('analysis-details').open=false;
   el('result-area').setAttribute('aria-busy','true');
   const btn=el('analyze-btn');btn.disabled=true;btn.textContent='분석 중…';
+  let displayed=false,completed=false;
   try{
-    const r=await api('/api/analyze','POST',{market,symbol,name,with_ai:false},analysisController.signal);
-    if(request!==analysisRequest)return;
-    current=r;
-    el('analysis-details').open=false;
-    drawResult(r);
-    el('result-area').hidden=false;
-    el('result-area').scrollIntoView({behavior:'smooth',block:'start'});
+    await streamAnalysis({market,symbol,name,with_ai:false},controller.signal,update=>{
+      if(request!==analysisRequest || controller.signal.aborted)return;
+      const r=update.result;
+      if(r.symbol!==symbol || r.market!==market)throw new Error('요청한 종목과 분석 응답이 다릅니다. 다시 분석해 주세요.');
+      const partial=update.stage==='partial';
+      drawResult(r,{initializeQA:false,pendingSources:update.pending_sources,partial});
+      if(!partial){
+        current=r;completed=true;
+        if(typeof resetStockQA==='function')resetStockQA(r);
+        el('backtest-button').disabled=false;
+      }
+      el('loading-state').hidden=true;
+      el('result-area').hidden=false;
+      if(!displayed){el('result-area').scrollIntoView({behavior:'smooth',block:'start'});displayed=true;}
+    });
   }catch(e){
     if(request!==analysisRequest || e.name==='AbortError')return;
-    el('empty-state').hidden=false;
-    say(e.message,true);
+    if(displayed && !completed){
+      el('decision-headline').textContent='일부 자료만 확인됨 · 다시 분석해 주세요';
+      el('decision-label').textContent='확인 미완료';
+      el('decision-card').dataset.tone='hold';
+      el('decision-next').textContent='아래에서 확인된 차트를 볼 수 있습니다. 종합 판단을 확인하려면 다시 분석해 주세요.';
+      el('signal-status').textContent='종합 확인 미완료';
+      el('signal-status').className='status-pill hold';
+      el('quality-status').textContent='종합 자료 확인 미완료';
+      el('analysis-progress').hidden=false;
+      el('analysis-progress').dataset.state='error';
+      el('analysis-progress').textContent='자료 확인이 중단되었습니다. 종합 판단과 AI 질문은 아직 준비되지 않았습니다.';
+    }else el('empty-state').hidden=false;
+    say(e.name==='TypeError'?'분석 연결을 읽지 못했습니다. 다시 분석해 주세요.':e.message,true);
   }finally{
     if(request===analysisRequest){
       el('loading-state').hidden=true;
       el('result-area').setAttribute('aria-busy','false');
       btn.disabled=false;btn.innerHTML='매수 시점 확인 <span>↗</span>';
+      if(analysisController===controller)analysisController=null;
     }
   }
 }
 function showChecks(id,list){el(id).innerHTML=list.map(c=>`<div class="check-item"><div class="check-icon ${c.pass?'yes':''}">${c.pass?'✓':'!'}</div><div><div class="check-name">${escapeHtml(c.name)}</div><div class="check-detail">${escapeHtml(c.detail)}</div></div></div>`).join('');}
 function sourcesList(id,items,error){el(id).innerHTML=error?`<div class="source-empty">${escapeHtml(error)}</div>`:items.length?items.map((n,i)=>`<a class="source-item" href="${escapeHtml(safeUrl(n.link))}" target="_blank" rel="noopener noreferrer"><div class="source-title">${escapeHtml(n.title)} ↗</div><div class="source-meta">[${id==='news-list'?'N':id==='research-list'?'R':'F'}${i+1}] ${escapeHtml(n.source)}${n.broker?' · '+escapeHtml(n.broker):''} · ${escapeHtml(n.date||n.published_at||'발행일 미상')}</div><div class="source-meta">${escapeHtml(n.fallback_reason||n.verification||n.basis||'')}</div></a>`).join(''):'<div class="source-empty">현재 표시할 근거가 없습니다. 자료가 없다는 사실은 안전하다는 뜻이 아닙니다.</div>';}
 function drawChart(points,levels,market){const svg=el('price-chart');const W=750,H=255,L=14,R=63,T=19,B=27;const values=points.map(p=>p.close).filter(Number.isFinite);if(levels)values.push(levels.entry_low,levels.entry_high,levels.stop,levels.target_resistance);let lo=Math.min(...values),hi=Math.max(...values);const pad=Math.max((hi-lo)*.09,1);lo-=pad;hi+=pad;const x=i=>L+i/(Math.max(points.length-1,1))*(W-L-R);const y=v=>T+(hi-v)/(hi-lo)*(H-T-B);const grid=[0,.25,.5,.75,1].map(t=>{const val=lo+(hi-lo)*t;return `<line x1="${L}" x2="${W-R+4}" y1="${y(val)}" y2="${y(val)}" stroke="#e5edf3" stroke-dasharray="4,5"/><text x="${W-R+10}" y="${y(val)+4}" font-size="11" fill="#90a0ac">${escapeHtml(nf(val,market))}</text>`}).join('');const line=points.map((p,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(p.close).toFixed(1)}`).join(' ');const zoneTop=levels?y(levels.entry_high):0,zoneBottom=levels?y(levels.entry_low):0;const start=points[0]?.date||'',end=points.at(-1)?.date||'';svg.innerHTML=`${grid}${levels?`<rect x="${L}" y="${zoneTop}" width="${W-L-R}" height="${Math.max(1,zoneBottom-zoneTop)}" fill="#d8eafa" opacity=".8"/><line x1="${L}" x2="${W-R}" y1="${y(levels.stop)}" y2="${y(levels.stop)}" stroke="#d57e7e" stroke-width="1.5" stroke-dasharray="5,5"/>`:''}<path d="${line}" fill="none" stroke="#173e5b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${x(points.length-1)}" cy="${y(points.at(-1).close)}" r="4.5" fill="#266db5" stroke="white" stroke-width="2"/><text x="${L}" y="${H-5}" font-size="11" fill="#95a2ae">${escapeHtml(start)}</text><text x="${W-R}" text-anchor="end" y="${H-5}" font-size="11" fill="#95a2ae">${escapeHtml(end)}</text>`;}
-function drawDecision(r){
+function drawDecision(r,pendingSources=[],partial=false){
   const decision=buildDecision(r);
+  const decisionReady=!DECISION_SOURCES.some(source=>pendingSources.includes(source));
   el('decision-company').textContent=(r.company_name||r.symbol)+(r.company_name && r.company_name!==r.symbol?' ('+r.symbol+')':'')+' · 지금 매수해도 될까요?';
   el('decision-headline').textContent=decision.headline;
   el('decision-card').dataset.tone=decision.tone;
@@ -81,9 +146,44 @@ function drawDecision(r){
   el('decision-reasons').innerHTML=decision.reasons.map(reason=>'<li>'+escapeHtml(reason)+'</li>').join('');
   el('decision-next').textContent=decision.nextStep;
   el('decision-sources').innerHTML=(decision.sources||[]).map(source=>`<span>${escapeHtml(source.label)} <strong>${escapeHtml(source.state)}</strong></span>`).join('');
+  if(partial){
+    const sourceKeys={'재무':['financials'],'기사·공시':['news','filings'],'리서치':['research'],'미국 경제':['macro']};
+    el('decision-sources').innerHTML=(decision.sources||[]).map(source=>`<span>${escapeHtml(source.label)} <strong>${escapeHtml((sourceKeys[source.label]||[]).some(key=>pendingSources.includes(key))?'확인 중':source.state)}</strong></span>`).join('');
+    if(!decisionReady){
+      el('decision-headline').textContent='차트 계산 완료 · 종합 판단 확인 중';
+      el('decision-label').textContent='확인 중';
+      el('decision-card').dataset.tone='hold';
+      el('decision-reasons').innerHTML='<li>확정 일봉으로 차트와 참고 가격대를 계산했습니다.</li><li>재무·기사·공시·미국 경제 확인이 끝나면 종합 판단을 표시합니다.</li>';
+      el('decision-next').textContent='확인 중인 자료가 있습니다. 차트 계산만으로 매수 시점을 판단하지 않습니다.';
+      el('signal-status').textContent='종합 판단 확인 중';
+      el('signal-status').className='status-pill hold';
+    }
+  }
+  const progress=el('analysis-progress');
+  progress.hidden=!partial;
+  progress.dataset.state='loading';
+  if(partial){
+    const pending=[...new Set(pendingSources)],done=Object.keys(ANALYSIS_SOURCES).length-pending.length;
+    progress.textContent=(decisionReady?'핵심 자료 점검 완료 · ':'차트 계산 완료 · ')+`자료 점검 ${done}/6 완료`+(pending.length?' · '+(decisionReady?'추가 ':'')+pending.map(source=>ANALYSIS_SOURCES[source]).join('·')+' 확인 중':' · 결과 정리 중')+' · AI 질문은 전체 확인 후 열립니다.';
+  }
   el('decision-source-link').textContent=r.market==='US'?'Yahoo 시세 출처 확인 ↗':'네이버 증권에서 확인 ↗';
   el('decision-source-link').href=r.market==='US'?'https://finance.yahoo.com/quote/'+encodeURIComponent(r.symbol):'https://finance.naver.com/item/main.naver?code='+encodeURIComponent(r.symbol);
   el('decision-asof').textContent=`${r.analysis.date} 확정 종가 ${nf(r.analysis.close,r.market)} ${currency(r.market)} 기준 · 실시간 판단이 아닙니다.`;
+  if(r.cache?.hit===true)el('decision-asof').textContent=`${Math.max(0,Math.floor(Number(r.cache.age_seconds)||0))}초 전 조회 자료 · 기준시각 ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · `+el('decision-asof').textContent;
+}
+function drawPendingSources(pendingSources){
+  for(const [source,id] of Object.entries({news:'news-list',filings:'filings-list',research:'research-list',financials:'financials-list'})){
+    if(pendingSources.includes(source))el(id).innerHTML=`<div class="source-empty">${escapeHtml(ANALYSIS_SOURCES[source])} 자료 확인 중…</div>`;
+  }
+  if(pendingSources.includes('macro')){
+    el('macro-status').textContent='확인 중';
+    el('macro-summary').textContent='미국 금리·환율·물가·주요 주식 자료를 확인하고 있습니다.';
+  }
+  if(pendingSources.includes('quote')){
+    el('quote-value').textContent='현재가 확인 중';
+    el('quote-info').textContent='현재가는 추가 참고 자료입니다. 차트는 확정 일봉으로 계산합니다.';
+  }
+  if(DECISION_SOURCES.some(source=>pendingSources.includes(source)))el('quality-status').textContent='종합 자료 확인 중';
 }
 function drawMacro(macro){
   const m=macro||{},metrics=m.metrics||{};
@@ -113,9 +213,9 @@ function drawPriceLevels(levels,market,quality){
   el('stop-legend').hidden=!eligible;
   return eligible?levels:null;
 }
-function drawResult(r){const a=r.analysis,levels=a.levels,m=r.market;el('result-market').textContent=marketName(m)+' · '+r.symbol;el('result-name').textContent=r.company_name||r.symbol;el('result-date').textContent=`최종 확정 일봉 ${a.date} · 조회 ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · ${r.meta.provider}`;el('close-price').textContent=nf(a.close,m)+' '+currency(m);el('signal-status').textContent=a.status;el('signal-status').className='status-pill '+(a.confirmed?'ok':a.status.includes('보류')||a.status.includes('확인')?'hold':'no');const q=r.data_quality||{};el('quality-status').textContent=q.status||'검증 상태 미확인';el('quality-warnings').innerHTML=(q.warnings||['품질 상태 미확인']).map(v=>'<li>'+escapeHtml(v)+'</li>').join('');const chartLevels=drawPriceLevels(levels,m,q);drawDecision(r);drawMacro(r.macro);if(typeof resetStockQA==='function')resetStockQA(r);el('pass-count').textContent=a.conditions.filter(x=>x.pass).length+' / '+a.conditions.length+'개 충족';showChecks('condition-list',a.conditions);showChecks('evidence-check-list',a.evidence_checks);el('formula-list').innerHTML=Object.entries(a.method).filter(([k])=>k!=='caveat').map(([k,v])=>`<div class="method-item"><strong>${escapeHtml({'entry':'매수가 범위','stop':'손절 기준','target':'목표/저항','risk_reward':'손익비 산식'}[k]||k)}</strong><div>${escapeHtml(v)}</div></div>`).join('');el('formula-caveat').textContent=a.method.caveat;const red=el('red-flags');red.hidden=!a.red_flags.length;red.textContent=a.red_flags.length?`주의: 최근 기사 제목에서 위험 키워드 ${a.red_flags.length}건 감지 · ${a.red_flags.slice(0,2).join(' / ')} · 문맥 확인 전 판단 보류`:' ';sourcesList('news-list',r.news,r.news_error);sourcesList('filings-list',r.filings,r.filings_error);sourcesList('research-list',r.research||[],r.research_error);const fitems=r.financials||[];el('financials-list').innerHTML=fitems.length?fitems.map(f=>`<a class="source-item" href="${escapeHtml(safeUrl(f.link))}" target="_blank" rel="noopener noreferrer"><div class="source-title">${escapeHtml(f.name)} · ${escapeHtml(Number(f.value).toLocaleString('ko-KR'))} ${escapeHtml(f.unit)}</div><div class="source-meta">${escapeHtml(f.period)} · ${escapeHtml(f.source)} · ${escapeHtml(f.basis)}</div></a>`).join(''):`<div class="source-empty">${escapeHtml(r.financials_error||'적합한 재무계정이 조회되지 않았습니다.')}</div>`;el('quote-value').textContent=r.quote?nf(r.quote.price,m)+' '+currency(m):'연결된 현재가 없음';
+function drawResult(r,{initializeQA=true,pendingSources=[],partial=false}={}){const a=r.analysis,levels=a.levels,m=r.market;el('result-market').textContent=marketName(m)+' · '+r.symbol;el('result-name').textContent=r.company_name||r.symbol;el('result-date').textContent=`최종 확정 일봉 ${a.date} · ${r.cache?.hit===true?Math.max(0,Math.floor(Number(r.cache.age_seconds)||0))+'초 전 조회 자료 · 기준시각':'조회'} ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · ${r.meta.provider}`;el('close-price').textContent=nf(a.close,m)+' '+currency(m);el('signal-status').textContent=a.status;el('signal-status').className='status-pill '+(a.confirmed?'ok':a.status.includes('보류')||a.status.includes('확인')?'hold':'no');const q=r.data_quality||{};el('quality-status').textContent=q.status||'검증 상태 미확인';el('quality-warnings').innerHTML=(q.warnings||['품질 상태 미확인']).map(v=>'<li>'+escapeHtml(v)+'</li>').join('');const chartLevels=drawPriceLevels(levels,m,q);drawDecision(r,pendingSources,partial);drawMacro(r.macro);if(initializeQA && typeof resetStockQA==='function')resetStockQA(r);el('pass-count').textContent=a.conditions.filter(x=>x.pass).length+' / '+a.conditions.length+'개 충족';showChecks('condition-list',a.conditions);showChecks('evidence-check-list',a.evidence_checks);el('formula-list').innerHTML=Object.entries(a.method).filter(([k])=>k!=='caveat').map(([k,v])=>`<div class="method-item"><strong>${escapeHtml({'entry':'매수가 범위','stop':'손절 기준','target':'목표/저항','risk_reward':'손익비 산식'}[k]||k)}</strong><div>${escapeHtml(v)}</div></div>`).join('');el('formula-caveat').textContent=a.method.caveat;const red=el('red-flags');red.hidden=!a.red_flags.length;red.textContent=a.red_flags.length?`주의: 최근 기사 제목에서 위험 키워드 ${a.red_flags.length}건 감지 · ${a.red_flags.slice(0,2).join(' / ')} · 문맥 확인 전 판단 보류`:' ';sourcesList('news-list',r.news,r.news_error);sourcesList('filings-list',r.filings,r.filings_error);sourcesList('research-list',r.research||[],r.research_error);const fitems=r.financials||[];el('financials-list').innerHTML=fitems.length?fitems.map(f=>`<a class="source-item" href="${escapeHtml(safeUrl(f.link))}" target="_blank" rel="noopener noreferrer"><div class="source-title">${escapeHtml(f.name)} · ${escapeHtml(Number(f.value).toLocaleString('ko-KR'))} ${escapeHtml(f.unit)}</div><div class="source-meta">${escapeHtml(f.period)} · ${escapeHtml(f.source)} · ${escapeHtml(f.basis)}</div></a>`).join(''):`<div class="source-empty">${escapeHtml(r.financials_error||'적합한 재무계정이 조회되지 않았습니다.')}</div>`;el('quote-value').textContent=r.quote?nf(r.quote.price,m)+' '+currency(m):'연결된 현재가 없음';
   el('quote-info').textContent=r.quote?`${r.quote.provider} · 조회 ${new Date(r.quote.fetched_at).toLocaleString('ko-KR')} · ${r.quote.exchange_timestamp?'체결시각 '+r.quote.exchange_timestamp:'체결시각 검증 불가'} · ${r.quote.verified_live?'5분 이내 체결시각 확인':'실시간 매매 기준으로 검증되지 않음'} · ${r.quote.note}`:(r.quote_error||'KIS 시세 API 미연결.');
-  el('ai-content').textContent=r.ai_summary||r.ai_error||'규칙 기반 근거를 검토하세요.';drawEvidence(r.evidence_pack);drawChart(r.chart,chartLevels,m);}
+  el('ai-content').textContent=r.ai_summary||r.ai_error||'규칙 기반 근거를 검토하세요.';drawEvidence(r.evidence_pack);drawChart(r.chart,chartLevels,m);if(partial)drawPendingSources(pendingSources);}
 function drawEvidence(pack){
   const summary=el('evidence-reasons'), documents=el('document-index');
   if(!pack){summary.textContent='근거 목록을 불러오지 못했습니다.';documents.textContent='근거 목록 없음';return;}

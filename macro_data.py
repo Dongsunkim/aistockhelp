@@ -12,7 +12,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 import csv
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 import math
 from threading import Lock
@@ -176,8 +176,13 @@ def _fetch_metric(key, now, session):
     client = session if session is not None else requests.Session()
     try:
         if key in FRED:
+            # Daily comparisons need two recent observations; CPI additionally
+            # needs the exact current/prior month and both year-ago months.
+            # Retain ample publication-lag room without downloading decades.
+            days = 800 if key == "inflation" else 30
+            start = now.astimezone(NY).date() - timedelta(days=days)
             response = client.get("https://fred.stlouisfed.org/graph/graph.csv",
-                                  params={"id": FRED[key]}, timeout=8)
+                                  params={"id": FRED[key], "cosd": start.isoformat()}, timeout=8)
             response.raise_for_status()
             return _fred_metric(response.text, key, now)
         response = client.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(STOCKS[key], safe='')}",
