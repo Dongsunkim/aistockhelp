@@ -103,7 +103,7 @@ def health():
     return {'status':'ok','version':'0.4.1-recovery','time_utc':datetime.now(timezone.utc).isoformat(),
             'serverless': ON_VERCEL, 'requires_password': False, 'public_no_login': True,
             'watchlist_storage': 'browser_local' if ON_VERCEL else 'sqlite',
-            'configured':{'dart':bool(os.environ.get('DART_API_KEY')),
+            'configured':{'dart':bool(os.environ.get('DART_API_KEY') or os.environ.get('DART_API')),
                           'kis_quote':kis_configured(),
                           'sec':bool(os.environ.get('SEC_USER_AGENT')),
                           'ai':bool(os.environ.get('OPENAI_API_KEY')) and not ON_VERCEL,
@@ -156,11 +156,11 @@ def run_analysis(symbol:str,name:str,market:str,with_ai:bool=False):
         research_err='보고서 관련 보도 검색 실패: '+str(e)[:160]
     try:
         if market=='US':filings=fetch_sec_filings(symbol,os.environ.get('SEC_USER_AGENT',''))
-        else: filings=fetch_dart_filings(symbol,os.environ.get('DART_API_KEY',''))
+        else: filings=fetch_dart_filings(symbol,(os.environ.get('DART_API_KEY') or os.environ.get('DART_API','')))
     except (requests.RequestException,ValueError,KeyError,TypeError,Exception) as e:
         filings_err='공시 확인 불가: '+str(e)[:160]
     try:
-        financials=fetch_financial_facts(symbol,market,dart_key=os.environ.get('DART_API_KEY',''),
+        financials=fetch_financial_facts(symbol,market,dart_key=(os.environ.get('DART_API_KEY') or os.environ.get('DART_API','')),
                                          sec_user_agent=os.environ.get('SEC_USER_AGENT',''))
     except (requests.RequestException,ValueError,KeyError,TypeError) as e:
         financials_err='재무계정 확인 불가: '+str(e)[:160]
