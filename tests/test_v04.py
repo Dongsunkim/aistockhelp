@@ -50,6 +50,7 @@ def test_public_vercel_does_not_call_paid_ai(monkeypatch):
     monkeypatch.setattr(module,'fetch_research_mentions',lambda *a,**k:[])
     monkeypatch.setattr(module,'fetch_financial_facts',lambda *a,**k:[])
     monkeypatch.setattr(module,'kis_configured',lambda:False)
+    monkeypatch.setattr(module,'fetch_naver_quote',lambda *a,**k:{'provider':'네이버증권 비공식 시세','price':100,'verified_live':False})
     def fail_if_called(*a,**k):
         raise AssertionError('Paid AI must never be called for the public site')
     monkeypatch.setattr(module,'summarize_with_openai',fail_if_called)

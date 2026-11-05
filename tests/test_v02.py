@@ -69,13 +69,14 @@ def test_full_analysis_response_offline(monkeypatch):
         {'name':'매출액','value':1000,'unit':'KRW','period':'2026년 반기',
          'reported_at':None,'source':'OpenDART','basis':'연결','link':'https://dart.fss.or.kr'}])
     monkeypatch.setattr(api_module,'kis_configured',lambda:False)
+    monkeypatch.setattr(api_module,'fetch_naver_quote',lambda *a,**k:{'provider':'네이버증권 비공식 시세','price':100,'verified_live':False})
     client=TestClient(api_module.app)
     payload=client.post('/api/analyze',json={'symbol':'005930','market':'KOSPI','name':'테스트','with_ai':False})
     assert payload.status_code==200
     data=payload.json()
     assert data['research'][0]['title']=='리포트 관련 보도'
     assert data['financials'][0]['value']==1000
-    assert data['quote_error'].startswith('시세 API 미연결')
+    assert data['quote']['provider']=='네이버증권 비공식 시세'
     assert data['analysis']['levels']['entry_low']>0
     back=client.post('/api/backtest',json={'symbol':'005930','market':'KOSPI','horizon':5})
     assert back.status_code==200
