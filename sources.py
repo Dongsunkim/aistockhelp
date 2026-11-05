@@ -31,6 +31,9 @@ def yahoo_symbol(symbol: str, market: str) -> str:
 
 def fetch_daily(symbol: str, market: str, *, history: str = "1y") -> tuple[pd.DataFrame,dict]:
     if history not in ("1y","3y"): raise ValueError("조회 기간은 1y 또는 3y입니다.")
+    if market in ('KOSPI','KOSDAQ'):
+        from naver_history import fetch_naver_daily
+        return fetch_naver_daily(symbol,market,history=history)
     ticker=yahoo_symbol(symbol,market)
     url=f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}'
     response=_SESSION.get(url,params={'range':history,'interval':'1d','events':'div,splits'},timeout=12)
@@ -65,8 +68,8 @@ def fetch_daily(symbol: str, market: str, *, history: str = "1y") -> tuple[pd.Da
     if not rows:
         raise ValueError('확정된 일봉 데이터가 없습니다.')
     df=pd.DataFrame(rows).drop_duplicates('date').sort_values('date')
-    meta={'provider':'Yahoo Finance 비공식 차트 API (지연 가능, 개인 연구용)',
-          'symbol':ticker,'market_timezone':str(exchange_tz),
+    meta={'provider':'Yahoo Finance 비공식 차트 API (미국만 사용, 지연 가능)',
+          'symbol':ticker,'source':'YAHOO_US_ONLY','market_timezone':str(exchange_tz),
           'fetched_at':datetime.now(timezone.utc).isoformat(),
           'completed_daily_bar':df.iloc[-1]['date'],
           'quote_currency':'KRW' if market != 'US' else 'USD',

@@ -16,12 +16,14 @@ from sources import (fetch_daily,fetch_news,fetch_research_mentions,fetch_dart_f
 
 from quotes import configured as kis_configured, fetch_kis_quote
 from backtest import backtest_technical
+from naver_history import fetch_naver_quote
+from data_quality import check as audit_data
 
 ROOT=Path(__file__).parent
 ON_VERCEL=bool(os.getenv("VERCEL")) or bool(os.getenv("VERCEL_ENV"))
 load_dotenv(ROOT/'.env')
 DB=Path(os.environ.get('SIGNAL_DB',str(ROOT/'signals.sqlite3')))
-app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.4.0')
+app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.4.1-recovery')
 app.mount('/static',StaticFiles(directory=str(ROOT/'static')),name='static')
 
 
@@ -98,7 +100,7 @@ def home(): return FileResponse(ROOT/'static/index.html')
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.4.0','time_utc':datetime.now(timezone.utc).isoformat(),
+    return {'status':'ok','version':'0.4.1-recovery','time_utc':datetime.now(timezone.utc).isoformat(),
             'serverless': ON_VERCEL, 'requires_password': False, 'public_no_login': True,
             'watchlist_storage': 'browser_local' if ON_VERCEL else 'sqlite',
             'configured':{'dart':bool(os.environ.get('DART_API_KEY')),
@@ -107,7 +109,7 @@ def health():
                           'ai':bool(os.environ.get('OPENAI_API_KEY')) and not ON_VERCEL,
                           'telegram':bool(os.environ.get('TELEGRAM_BOT_TOKEN') and os.environ.get('TELEGRAM_CHAT_ID'))},
             'ai_note':'공개 클라우드에서는 유료 AI 호출을 차단하고, 규칙 기반 근거 설명을 제공합니다.',
-            'warning':'야후 일봉은 확정 종가입니다. 선택적 KIS REST 조회는 실시간 체결이 검증되지 않을 수 있고, 미국 시세는 지연될 수 있습니다.'}
+            'warning':'국내 네이버 비공식 확정 일봉(검증 실패 시 대체 금지), 미국 Yahoo 비공식 종가. 기업가치 검증 전 매매 판단은 보류합니다.'}
 
 
 @app.get('/api/watchlist')
@@ -171,12 +173,22 @@ def run_analysis(symbol:str,name:str,market:str,with_ai:bool=False):
             'research_error':research_err,
             'chart': [{'date':str(row['date']),'close':round(float(row['close']),4)}
                       for _,row in bars.tail(120).iterrows()]}
-    if kis_configured():
+    if market in ('KOSPI','KOSDAQ'):
+        try:
+            bundle['quote']=fetch_naver_quote(symbol)
+        except (requests.RequestException,ValueError,KeyError,TypeError) as e:
+            bundle['quote_error']='네이버 현재가 미검증: '+str(e)[:150]
+    elif kis_configured():
         try:bundle['quote']=fetch_kis_quote(symbol,market)
         except (requests.RequestException,ValueError,KeyError) as e:
             bundle['quote_error']='KIS 시세 조회 실패: '+str(e)[:170]
     else:
         bundle['quote_error']='시세 API 미연결: 확정 종가만 표시합니다.'
+    audit=audit_data(market,meta,bars,result,financials,financials_err)
+    bundle['data_quality']=audit
+    if not audit['verified_for_trade']:
+        result['status']=audit['status']
+        result['confirmed']=False
     bundle['evidence_pack']=build_evidence_pack(bundle)
     if with_ai and not ON_VERCEL:
         try:bundle['ai_summary']=summarize_with_openai(bundle)

@@ -21,7 +21,8 @@ def build_evidence_pack(payload):
     docs = [{
         'id':'P1', 'kind':'가격 데이터', 'tier':'기술 데이터', 'title':f'{ticker} 확정 일봉 / OHLCV',
         'source':meta.get('provider') or '시세 제공원', 'published_at':str(analysis.get('date') or ''),
-        'url':f'https://finance.yahoo.com/quote/{quote(ticker, safe="")}/history/',
+        'url':(f'https://m.stock.naver.com/domestic/stock/{symbol}/total' if market != 'US'
+               else f'https://finance.yahoo.com/quote/{quote(ticker, safe="")}/history/'),
         'level':'가격·거래량 계산에 사용',
         'why':'20·60·120일 이동평균선, RSI, ATR, 지지·저항, 매수 검토 구간의 수치적 입력값',
         'warning':'비공식 종가 데이터입니다. 체결가·배당조정·기업행사 적용 여부를 증권사와 대조해야 합니다.'
@@ -67,17 +68,25 @@ def build_evidence_pack(payload):
     passes=sum(bool(c['pass']) for c in analysis['conditions'])
     total=len(analysis['conditions'])
     primary=len([d for d in docs if d['kind'] in ('공식 공시','공식 재무 수치')])
+    quality=payload.get('data_quality') or {}
+    if quality and not quality.get('price_levels_eligible'):
+        reasons=[
+            f'데이터 정확성 확인 전에는 매수 검토 구간, 손절가 및 목표가를 제시하지 않습니다. 상태: {analysis["status"]}',
+            '검증 항목: '+', '.join(quality.get('warnings',[])[:5]),
+            '이 분석은 국내 네이버 비공식 일봉과 공식 재무자료의 교차 확인을 필요로 합니다.'
+        ]
+    else:
+        reasons=[
+            f'확정 종가 기반 기술 조건 {passes}/{total}개 충족. {analysis["status"]} 상태입니다.',
+            f'매수 관찰 구간 {levels["entry_low"]:,.2f}~{levels["entry_high"]:,.2f}은 20일 이동평균선과 ATR 변동성으로 계산한 가설입니다.',
+            f'손절 가설 {levels["stop"]:,.2f}, 저항 가설 {levels["target_resistance"]:,.2f}; 기대 손익비 1:{levels["rr"]:,.2f}입니다.',
+            '기술적 가설은 기업 내재가치나 원문 검증을 대신할 수 없습니다.'
+        ]
     return {
         'generated_at':datetime.now(timezone.utc).isoformat(), 'documents':docs,
         'source_counts':{'price':1,'primary':primary,'news':len([d for d in docs if d['kind']=='최신 뉴스']),
                          'research_mentions':len([d for d in docs if d['kind']=='리포트 관련 보도'])},
-        'price_reason':[
-            f'확정 종가 기반 기술 조건 {passes}/{total}개 충족. {analysis["status"]} 상태입니다.',
-            f'매수 관찰 구간 {levels["entry_low"]:,.2f}~{levels["entry_high"]:,.2f}은 20일 이동평균선과 ATR 변동성으로 계산한 가설입니다.',
-            f'손절 가설 {levels["stop"]:,.2f}, 저항 가설 {levels["target_resistance"]:,.2f}; 기대 손익비 1:{levels["rr"]:,.2f}입니다.',
-            f'공식 공시·재무 참고문서 {primary}건, 기사 {len([d for d in docs if d["kind"]=="최신 뉴스"])}건, 리포트 관련 보도 {len([d for d in docs if d["kind"]=="리포트 관련 보도"])}건을 연결했습니다.',
-            '공시·뉴스·리포트 전문 검증과 기업 내재가치 평가는 아직 수행하지 않았습니다. 원문 확인 전 매매 확정 금지.'
-        ],
+        'price_reason':reasons,
         'methodology_url':'/static/evidence-guide.html',
         'limitations': ['관찰 가격은 기업의 적정가치가 아닌 기술적 산식 결과입니다.',
                         '뉴스·공시·보고서 제목과 공개 수치만 조회했으며 독립적으로 진실을 검증하지 않았습니다.',

@@ -10,7 +10,7 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand"><div class="logo">S<span>•</span></div><div><strong>SignalDesk</strong><small>나만의 보수적 투자 리서치 비서</small></div></div>
-      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">CLOUD v0.4</span></div>
+      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">RECOVERY v0.4.1</span></div>
     </header>
     <main>
       <section class="hero">
@@ -40,9 +40,10 @@
       <div id="empty-state" class="empty-state"><div class="empty-icon">⌁</div><h2>분석할 종목을 선택하세요</h2><p>과거 확정 일봉과 최신 기사·공시의 메타데이터를 비교합니다.<br/>가격은 가설이며 매수 판단의 확정 근거가 아닙니다.</p></div>
 
       <div id="result-area" hidden>
+        <section class="card quality-panel" aria-live="polite"><h3>데이터 정확성·재무 검증</h3><p id="quality-status">기준 데이터 확인 전</p><ul id="quality-warnings"></ul></section>
         <section class="result-head card"><div><div class="eyebrow" id="result-market">MARKET OVERVIEW</div><h2 id="result-name"></h2><div class="result-date" id="result-date"></div></div>
           <div class="price-block"><div class="eyebrow">마지막 확정 종가</div><div class="price" id="close-price"></div><div class="status-pill" id="signal-status"></div></div></section>
-        <section class="card quote-card"><div><div class="eyebrow">OPTIONAL MARKET SNAPSHOT</div><h3>추가 시세 조회 (KIS 선택 연동)</h3><p id="quote-info" class="small-note">KIS API가 연결되지 않으면 확정 종가만 분석합니다.</p></div><div id="quote-value" class="quote-value">별도 시세 미연결</div></section>
+        <section class="card quote-card"><div><div class="eyebrow">OPTIONAL MARKET SNAPSHOT</div><h3>현재가 참고: 국내 네이버증권 / 미국 KIS 선택 연동</h3><p id="quote-info" class="small-note">KIS API가 연결되지 않으면 확정 종가만 분석합니다.</p></div><div id="quote-value" class="quote-value">별도 시세 미연결</div></section>
         <div class="analysis-grid">
           <div class="main-column">
             <section class="card range-card"><div class="section-heading"><div><div class="eyebrow">PRICE ZONE · 기술적 시나리오</div><h3>매수 검토 가격대</h3></div><div class="info-icon" title="기술적 수준을 수식으로 계산한 가격 가설입니다.">ⓘ</div></div>
@@ -73,6 +74,6 @@
       <footer>로그인 없는 공개 연구·학습용 프로토타입 · 비공식 시세는 지연 또는 오류가 발생할 수 있습니다. 미래에셋증권 계좌 접근 및 주문 기능은 포함하지 않습니다.<br/>© SignalDesk MVP · 투자손실 책임은 투자자에게 있으며 과거 기술적 신호는 미래 수익을 보장하지 않습니다.</footer>
     </main>
   </div>
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=041r"></script>
 </body>
 </html>
