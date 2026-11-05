@@ -10,13 +10,13 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand"><div class="logo">S<span>•</span></div><div><strong>SignalDesk</strong><small>나만의 보수적 투자 리서치 비서</small></div></div>
-      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">RECOVERY v0.4.1</span></div>
+      <div class="top-right"><div class="live-dot"></div><span>일봉 분석 · 시세 API 선택 연동</span><span class="version">TIMING v0.4.2</span></div>
     </header>
     <main>
       <section class="hero">
         <div class="hero-label">CONSERVATIVE BY DESIGN</div>
-        <h1>가격보다 먼저, <em>근거</em>를 확인합니다.</h1>
-        <p>국내·미국 주식의 진입 구간을 계산하고 최근 기사와 공식 공시를 함께 확인합니다. 증거가 부족하면 매수 신호를 내지 않습니다.</p>
+        <h1>지금 매수해도 될까?<br/><em>판단부터 간단하게.</em></h1>
+        <p>종목을 선택하면 현재 데이터에 따른 판단과 핵심 이유를 먼저 보여드립니다. 가격대·차트·뉴스는 필요할 때 펼쳐볼 수 있습니다.</p>
         <div class="safety"><span class="shield">✓</span> 직접 매매 전 미래에셋 M-STOCK의 실시간 시세·원문 확인 필수 <span>·</span> 자동주문 없음</div>
       </section>
 
@@ -25,7 +25,7 @@
           <label>시장<select id="market"><option value="KOSPI">국내 · 코스피</option><option value="KOSDAQ">국내 · 코스닥</option><option value="US">미국 · NYSE/나스닥</option></select></label>
           <label>종목코드<input id="symbol" required placeholder="예: 005930" maxlength="18" value="005930"/></label>
           <label class="name-field">기업명 (뉴스 검색용)<input id="company-name" placeholder="예: 삼성전자" maxlength="80" value="삼성전자"/></label>
-          <button id="analyze-btn" class="primary" type="submit">근거 분석하기 <span>↗</span></button>
+          <button id="analyze-btn" class="primary" type="submit">매수 시점 확인 <span>↗</span></button>
         </form>
         <div class="quick-picks"><span>빠른 선택</span>
           <button type="button" data-market="KOSPI" data-symbol="005930" data-name="삼성전자">삼성전자</button>
@@ -35,8 +35,71 @@
         </div>
       </section>
 
-      <section class="status-bar" id="setup-state">설정 상태 확인 중…</section>
       <div id="app-message" role="status" class="notice" hidden></div>
+      <div id="empty-state" class="empty-state"><div class="empty-icon">⌁</div><h2>분석할 종목을 선택하세요</h2><p>지금 매수를 검토할 시점인지, 기다려야 하는지와 그 이유를 확인하세요.</p></div>
+
+      <section class="card loading-state" id="loading-state" role="status" hidden>
+        <div class="loading-indicator" aria-hidden="true"></div>
+        <div><strong id="loading-name"></strong><p>차트·재무·기사·공시를 함께 확인하고 있습니다.</p></div>
+      </section>
+      <div id="result-area" hidden>
+        <section class="card decision-card" id="decision-card" aria-live="polite">
+          <p class="decision-company" id="decision-company"></p>
+          <span class="decision-label" id="decision-label"></span>
+          <h2 id="decision-headline"></h2>
+          <ul class="decision-reasons" id="decision-reasons"></ul>
+          <div class="decision-next"><strong>다시 확인할 때</strong><p id="decision-next"></p></div>
+          <div class="decision-sources" id="decision-sources" aria-label="판단에 사용한 자료 확인 상태"></div>
+          <p class="small-note" id="decision-asof"></p>
+          <a class="guide-link" id="decision-source-link" target="_blank" rel="noopener noreferrer"></a>
+        </section>
+        <section class="card mini-qa" aria-labelledby="qa-heading">
+          <h3 id="qa-heading">이 종목에 질문하기</h3>
+          <form id="qa-form">
+            <input id="qa-input" type="text" maxlength="600" minlength="2" required placeholder="예: 지금 기다려야 하는 가장 큰 이유는?" aria-label="선택한 종목에 대해 궁금한 점"/>
+            <button id="qa-submit" class="secondary" type="submit">질문</button>
+          </form>
+          <div id="qa-result" hidden><p id="qa-notice" class="small-note" role="status"></p><div id="qa-answer"></div><div id="qa-sources"></div></div>
+        </section>
+        <details class="analysis-details" id="analysis-details">
+          <summary>가격대·차트·뉴스·검증 근거 자세히 보기</summary>
+          <div class="analysis-details-body">
+            <section class="status-bar" id="setup-state">설정 상태 확인 중…</section>
+            <section class="card macro-card"><div class="section-heading"><h3>미국 경제·시장 필수 점검</h3><span id="macro-status" class="small-tag"></span></div><p id="macro-summary"></p><div id="macro-metrics" class="macro-metrics"></div><ul id="macro-warnings"></ul><p class="small-note">금리·환율은 일별 관측, 물가는 월별 CPI 전년 동월 대비입니다. 지수·종목은 확정 일봉 등락이며, 발표일과 관측 기준일은 다를 수 있습니다.</p></section>
+        <section class="card quality-panel" aria-live="polite"><h3>데이터 정확성·재무 검증</h3><p id="quality-status">기준 데이터 확인 전</p><ul id="quality-warnings"></ul></section>
+        <section class="result-head card"><div><div class="eyebrow" id="result-market">MARKET OVERVIEW</div><h2 id="result-name"></h2><div class="result-date" id="result-date"></div></div>
+          <div class="price-block"><div class="eyebrow">마지막 확정 종가</div><div class="price" id="close-price"></div><div class="status-pill" id="signal-status"></div></div></section>
+        <section class="card quote-card"><div><div class="eyebrow">OPTIONAL MARKET SNAPSHOT</div><h3>현재가 참고: 국내 네이버증권 / 미국 KIS 선택 연동</h3><p id="quote-info" class="small-note">KIS API가 연결되지 않으면 확정 종가만 분석합니다.</p></div><div id="quote-value" class="quote-value">별도 시세 미연결</div></section>
+        <div class="analysis-grid">
+          <div class="main-column">
+            <section class="card range-card"><div class="section-heading"><div><div class="eyebrow">PRICE ZONE · 기술적 시나리오</div><h3>매수 검토 가격대</h3></div><div class="info-icon" title="기술적 수준을 수식으로 계산한 가격 가설입니다.">ⓘ</div></div>
+              <p class="status-pill hold" id="price-level-status"></p><div class="entry-zone" id="entry-zone">—</div><div class="entry-caption" id="entry-caption"></div>
+              <div class="price-stats"><div><div class="stat-title">손절 기준 가설</div><strong id="stop-price">—</strong></div><div><div class="stat-title">60일 고가 90분위 저항</div><strong id="target-price">—</strong></div><div><div class="stat-title">예상 손익비</div><strong id="rr-value">—</strong></div></div>
+              <div class="chart-wrap"><svg id="price-chart" viewBox="0 0 750 255" preserveAspectRatio="none" role="img" aria-label="최근 확정 일봉의 종가 및 기술적 수준"></svg></div>
+              <div class="chart-legend"><span><i class="legend-dot black"></i>확정 종가</span><span id="zone-legend"><i class="legend-dot blue"></i>진입 검토 구간</span><span id="stop-legend"><i class="legend-dot red"></i>손절 기준</span></div>
+            </section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">CHECKLIST</div><h3>가격 산출에 사용한 검증 조건</h3></div><span class="subtle" id="pass-count"></span></div><div id="condition-list" class="check-list"></div></section>
+            <section class="card evidence-explainer"><div class="section-heading"><div><div class="eyebrow">PRICE REASONS · 설명 가능한 산식</div><h3>왜 이 가격대를 관찰하나요?</h3></div><a class="guide-link" href="/static/evidence-guide.html" target="_blank" rel="noopener noreferrer">전체 분석 기준 보기 ↗</a></div><div id="evidence-reasons" class="reason-list">분석 후 가격·위험·근거 요약이 나타납니다.</div></section>
+            <section class="card"><div class="eyebrow">EXPLAINABILITY</div><h3>가격이 계산되는 방법</h3><div class="method-list" id="formula-list"></div><p class="small-note" id="formula-caveat"></p></section>
+          </div>
+          <aside class="side-column">
+            <section class="card verification"><div class="eyebrow">EVIDENCE GATE</div><h3>외부 근거 확인</h3><p class="subtle">뉴스·공시는 제목/발행일과 링크를 수집합니다. 원문 내용은 사람이 직접 확인해야 합니다.</p><div id="evidence-check-list" class="check-list"></div><div class="alert-warning" id="red-flags" hidden></div></section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">LIVE SOURCES*</div><h3>최신 기사</h3></div><span class="small-tag">발행시점 표시</span></div><div id="news-list" class="source-list"></div><p class="small-note">*RSS 수집 시점 기준. 원문 전문·실시간 속보 확인을 보장하지 않습니다.</p></section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">OFFICIAL FILINGS</div><h3>금융감독원 / SEC 공시</h3></div></div><div id="filings-list" class="source-list"></div></section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">FINANCIAL DATA · 출처 표시</div><h3>네이버 재무 · 공식 공시 수치</h3></div></div><p class="subtle">국내는 네이버증권 기업실적분석을 우선 조회하며, 조회 실패 시 OpenDART를 참고합니다. 출처·회계기간·연결/별도 기준을 구분하며, 네이버 집계치를 공식 공시로 표시하지 않습니다. 미국은 SEC 공시 수치를 사용합니다.</p><div id="financials-list" class="source-list"></div></section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">RESEARCH COVERAGE · UNVERIFIED</div><h3>네이버 증권 리서치 · 관련 보도</h3></div></div><p class="subtle">국내는 네이버증권의 종목별 리서치 목록을 우선 조회합니다. 증권사·발행일과 원문 링크를 제공하며, PDF 내용을 분석한 것은 아닙니다. 조회 실패 시 관련 보도를 구분해 표시합니다.</p><div id="research-list" class="source-list"></div></section>
+            <section class="card"><div class="section-heading"><div><div class="eyebrow">AI NOTES · OPTIONAL</div><h3>추가 AI 요약 (공개 웹앱 비활성)</h3></div></div><div id="ai-content" class="summary-block">공개 서버에서 무제한 유료 API 호출을 막기 위해 AI 요약을 비활성화합니다. 가격 산출 근거와 자료 목록은 위에 표시됩니다.</div></section>
+          </aside>
+        </div>
+        <section class="card document-library"><div class="section-heading"><div><div class="eyebrow">TRACEABLE EVIDENCE · 근거 자료실</div><h3>이 종목의 가격 판단에 참고할 문서</h3></div><span class="small-tag" id="document-count">자료 확인 전</span></div><p class="subtle">각 자료는 가격 계산에 사용했는지, 공식 원문인지, 기사 제목만 확인했는지를 구분합니다. 제목 검색만으로 보고서 원문을 분석했다고 주장하지 않습니다.</p><div id="document-index" class="document-index"><p class="source-empty">종목 분석 후 관련 자료가 표시됩니다.</p></div><p class="small-note">공시·재무자료는 수집 가능한 경우에만 표시됩니다. 최신 기사와 리포트 관련 보도는 검증되지 않은 참고 자료입니다.</p><a class="guide-link" href="/static/evidence-guide.html" target="_blank" rel="noopener noreferrer">매수가 산식·검증 조건·출처 우선순위 설명서 열기 ↗</a></section>
+        <section class="card backtest-card"><div class="section-heading"><div><div class="eyebrow">TECHNICAL-ONLY BACKTEST</div><h3>과거 데이터에서 매매 규칙 검증하기</h3></div></div><p class="subtle">뉴스·공시의 과거 시점 원문을 복원하지 않은 <strong>기술지표만의 과거 검증</strong>입니다. 신호를 종가에 확인한 후 다음 거래일 시가가 범위 안일 때만 진입합니다. 손절·저항 동시 도달 시 손절을 먼저 적용합니다.</p><div class="backtest-actions"><label>최대 보유 기간<select id="backtest-horizon"><option value="5">5거래일</option><option value="10" selected>10거래일</option><option value="20">20거래일</option></select></label><button class="secondary" id="backtest-button" type="button">최근 3년 기술적 전략 검증</button></div><div id="backtest-result" class="backtest-output" aria-live="polite">검증을 실행하면 실제 과거 데이터 기준 거래 건수, 승률, 수익률, 최대 낙폭과 가정을 확인할 수 있습니다.</div></section>
+        <section class="card watch-card"><div><div class="eyebrow">PRICE ALERT</div><h3>관심 종목 &amp; 가격 기준 저장</h3><p class="subtle" id="watch-help">환경 확인 중…</p></div>
+        <form id="watch-form"><label>매수 관찰 기준 (이하)<input type="number" id="watch-buy" placeholder="선택" min="0.01" step="0.01"/></label><label>매도 관찰 기준 (이상)<input type="number" id="watch-sell" placeholder="선택" min="0.01" step="0.01"/></label><button class="secondary" type="submit">관심 종목 저장</button></form></section>
+          </div>
+        </details>
+      </div>
+      <details class="analysis-details" id="dart-details">
+        <summary>DART 공시·전체 재무제표 직접 조회</summary>
       <section class="card dart-panel" aria-labelledby="dart-heading">
         <div class="section-heading"><div><div class="eyebrow">OPENDART · 공식 공시와 전체 재무제표</div><h2 id="dart-heading">DART 공시·재무 자료실</h2></div></div>
         <p class="subtle">위에서 선택한 국내 종목을 조회합니다. 주가 분석 없이도 사용할 수 있습니다. 연결·별도 재무제표의 모든 제공 계정과 비교기간 금액을 확인하고, 공시는 다음 페이지까지 조회할 수 있습니다.</p>
@@ -55,44 +118,14 @@
           <section aria-labelledby="dart-disclosure-heading"><div class="section-heading"><h3 id="dart-disclosure-heading">공시 목록</h3><button id="dart-disclosure-download" class="text-btn" type="button" disabled>조회한 공시 JSON 저장</button></div><div id="dart-disclosure-status" role="status" aria-live="polite"></div><div id="dart-disclosure-results" class="dart-disclosures"></div><div class="dart-page-actions"><button id="dart-more" class="secondary" type="button" hidden>다음 공시 100건 불러오기</button><button id="dart-all" class="secondary" type="button" hidden>공시 전체 불러오기</button></div></section>
         </div>
       </section>
-      <div id="empty-state" class="empty-state"><div class="empty-icon">⌁</div><h2>분석할 종목을 선택하세요</h2><p>과거 확정 일봉과 최신 기사·공시의 메타데이터를 비교합니다.<br/>가격은 가설이며 매수 판단의 확정 근거가 아닙니다.</p></div>
-
-      <div id="result-area" hidden>
-        <section class="card quality-panel" aria-live="polite"><h3>데이터 정확성·재무 검증</h3><p id="quality-status">기준 데이터 확인 전</p><ul id="quality-warnings"></ul></section>
-        <section class="result-head card"><div><div class="eyebrow" id="result-market">MARKET OVERVIEW</div><h2 id="result-name"></h2><div class="result-date" id="result-date"></div></div>
-          <div class="price-block"><div class="eyebrow">마지막 확정 종가</div><div class="price" id="close-price"></div><div class="status-pill" id="signal-status"></div></div></section>
-        <section class="card quote-card"><div><div class="eyebrow">OPTIONAL MARKET SNAPSHOT</div><h3>현재가 참고: 국내 네이버증권 / 미국 KIS 선택 연동</h3><p id="quote-info" class="small-note">KIS API가 연결되지 않으면 확정 종가만 분석합니다.</p></div><div id="quote-value" class="quote-value">별도 시세 미연결</div></section>
-        <div class="analysis-grid">
-          <div class="main-column">
-            <section class="card range-card"><div class="section-heading"><div><div class="eyebrow">PRICE ZONE · 기술적 시나리오</div><h3>매수 검토 가격대</h3></div><div class="info-icon" title="기술적 수준을 수식으로 계산한 가격 가설입니다.">ⓘ</div></div>
-              <div class="entry-zone" id="entry-zone">—</div><div class="entry-caption">이 구간에 왔다고 무조건 매수하는 것은 아닙니다. 모든 검증 조건을 통과해야 검토할 수 있습니다.</div>
-              <div class="price-stats"><div><div class="stat-title">손절 기준 가설</div><strong id="stop-price">—</strong></div><div><div class="stat-title">60일 고가 90분위 저항</div><strong id="target-price">—</strong></div><div><div class="stat-title">예상 손익비</div><strong id="rr-value">—</strong></div></div>
-              <div class="chart-wrap"><svg id="price-chart" viewBox="0 0 750 255" preserveAspectRatio="none" role="img" aria-label="최근 확정 일봉의 종가 및 기술적 수준"></svg></div>
-              <div class="chart-legend"><span><i class="legend-dot black"></i>확정 종가</span><span><i class="legend-dot blue"></i>진입 검토 구간</span><span><i class="legend-dot red"></i>손절 기준</span></div>
-            </section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">CHECKLIST</div><h3>가격 산출에 사용한 검증 조건</h3></div><span class="subtle" id="pass-count"></span></div><div id="condition-list" class="check-list"></div></section>
-            <section class="card evidence-explainer"><div class="section-heading"><div><div class="eyebrow">PRICE REASONS · 설명 가능한 산식</div><h3>왜 이 가격대를 관찰하나요?</h3></div><a class="guide-link" href="/static/evidence-guide.html" target="_blank" rel="noopener noreferrer">전체 분석 기준 보기 ↗</a></div><div id="evidence-reasons" class="reason-list">분석 후 가격·위험·근거 요약이 나타납니다.</div></section>
-            <section class="card"><div class="eyebrow">EXPLAINABILITY</div><h3>가격이 계산되는 방법</h3><div class="method-list" id="formula-list"></div><p class="small-note" id="formula-caveat"></p></section>
-          </div>
-          <aside class="side-column">
-            <section class="card verification"><div class="eyebrow">EVIDENCE GATE</div><h3>외부 근거 확인</h3><p class="subtle">뉴스·공시는 제목/발행일과 링크를 수집합니다. 원문 내용은 사람이 직접 확인해야 합니다.</p><div id="evidence-check-list" class="check-list"></div><div class="alert-warning" id="red-flags" hidden></div></section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">LIVE SOURCES*</div><h3>최신 기사</h3></div><span class="small-tag">발행시점 표시</span></div><div id="news-list" class="source-list"></div><p class="small-note">*RSS 수집 시점 기준. 원문 전문·실시간 속보 확인을 보장하지 않습니다.</p></section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">OFFICIAL FILINGS</div><h3>금융감독원 / SEC 공시</h3></div></div><div id="filings-list" class="source-list"></div></section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">OFFICIAL FINANCIAL FACTS</div><h3>공식 재무계정</h3></div></div><p class="subtle">OpenDART / SEC에 등록된 공시 수치입니다. 연결/별도, 분기 누적 여부, 회계기간을 확인해야 하며 단독으로 적정 매수가를 산출하지 않습니다.</p><div id="financials-list" class="source-list"></div></section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">RESEARCH COVERAGE · UNVERIFIED</div><h3>증권사 보고서 관련 보도</h3></div></div><p class="subtle">원문 리포트를 자동 열람하거나 검증한 것이 아니라, 목표주가·실적전망 관련 보도 검색 결과입니다. 보도 속 수치와 발행기관·발행일을 원문과 대조해야 합니다.</p><div id="research-list" class="source-list"></div></section>
-            <section class="card"><div class="section-heading"><div><div class="eyebrow">AI NOTES · OPTIONAL</div><h3>추가 AI 요약 (공개 웹앱 비활성)</h3></div></div><div id="ai-content" class="summary-block">공개 서버에서 무제한 유료 API 호출을 막기 위해 AI 요약을 비활성화합니다. 가격 산출 근거와 자료 목록은 위에 표시됩니다.</div></section>
-          </aside>
-        </div>
-        <section class="card document-library"><div class="section-heading"><div><div class="eyebrow">TRACEABLE EVIDENCE · 근거 자료실</div><h3>이 종목의 가격 판단에 참고할 문서</h3></div><span class="small-tag" id="document-count">자료 확인 전</span></div><p class="subtle">각 자료는 가격 계산에 사용했는지, 공식 원문인지, 기사 제목만 확인했는지를 구분합니다. 제목 검색만으로 보고서 원문을 분석했다고 주장하지 않습니다.</p><div id="document-index" class="document-index"><p class="source-empty">종목 분석 후 관련 자료가 표시됩니다.</p></div><p class="small-note">공시·재무자료는 수집 가능한 경우에만 표시됩니다. 최신 기사와 리포트 관련 보도는 검증되지 않은 참고 자료입니다.</p><a class="guide-link" href="/static/evidence-guide.html" target="_blank" rel="noopener noreferrer">매수가 산식·검증 조건·출처 우선순위 설명서 열기 ↗</a></section>
-        <section class="card backtest-card"><div class="section-heading"><div><div class="eyebrow">TECHNICAL-ONLY BACKTEST</div><h3>과거 데이터에서 매매 규칙 검증하기</h3></div></div><p class="subtle">뉴스·공시의 과거 시점 원문을 복원하지 않은 <strong>기술지표만의 과거 검증</strong>입니다. 신호를 종가에 확인한 후 다음 거래일 시가가 범위 안일 때만 진입합니다. 손절·저항 동시 도달 시 손절을 먼저 적용합니다.</p><div class="backtest-actions"><label>최대 보유 기간<select id="backtest-horizon"><option value="5">5거래일</option><option value="10" selected>10거래일</option><option value="20">20거래일</option></select></label><button class="secondary" id="backtest-button" type="button">최근 3년 기술적 전략 검증</button></div><div id="backtest-result" class="backtest-output" aria-live="polite">검증을 실행하면 실제 과거 데이터 기준 거래 건수, 승률, 수익률, 최대 낙폭과 가정을 확인할 수 있습니다.</div></section>
-        <section class="card watch-card"><div><div class="eyebrow">PRICE ALERT</div><h3>관심 종목 &amp; 가격 기준 저장</h3><p class="subtle" id="watch-help">환경 확인 중…</p></div>
-        <form id="watch-form"><label>매수 관찰 기준 (이하)<input type="number" id="watch-buy" placeholder="선택" min="0.01" step="0.01"/></label><label>매도 관찰 기준 (이상)<input type="number" id="watch-sell" placeholder="선택" min="0.01" step="0.01"/></label><button class="secondary" type="submit">관심 종목 저장</button></form></section>
-      </div>
+      </details>
       <section class="card watchlist-panel"><div class="section-heading"><div><div class="eyebrow">PERSONAL WATCHLIST</div><h3>저장한 관심 종목</h3></div><button class="text-btn" id="refresh-watch" type="button">새로고침 ↻</button></div><div id="watchlist-items" class="watch-items"><div class="subtle">저장된 종목을 불러오는 중…</div></div></section>
       <footer>로그인 없는 공개 연구·학습용 프로토타입 · 비공식 시세는 지연 또는 오류가 발생할 수 있습니다. 미래에셋증권 계좌 접근 및 주문 기능은 포함하지 않습니다.<br/>© SignalDesk MVP · 투자손실 책임은 투자자에게 있으며 과거 기술적 신호는 미래 수익을 보장하지 않습니다.</footer>
     </main>
   </div>
-  <script defer src="/static/app.js?v=041r"></script>
+  <script defer src="/static/decision.js?v=042"></script>
+  <script defer src="/static/app.js?v=042"></script>
+  <script defer src="/static/qa.js?v=042"></script>
   <script defer src="/static/dart.js?v=1"></script>
 </body>
 </html>

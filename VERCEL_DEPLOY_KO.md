@@ -15,7 +15,7 @@
 3. 저장소의 `Add file` > `Upload files`에서 압축 해제한 파일과 폴더 구조를 업로드하고 Commit합니다. `.env` 파일은 업로드하지 마세요. 업로드가 불편하면 GitHub Desktop을 이용할 수 있습니다.
 4. Vercel > `Add New` > `Project` > `Import Git Repository` > `signaldesk` 선택.
 5. FastAPI는 Vercel에서 지원합니다. Framework는 자동 감지 설정을 사용하세요. 별도 빌드 명령을 입력하지 않습니다.
-6. Vercel 프로젝트 `Settings > Environment Variables`에 **최소한 **설정할 필요가 없습니다**. 공개 앱에 개인 비밀번호를 입력하지 않습니다**합니다. 공개 버전은 분석 기능을 비밀번호 없이 제공하며, 서버에서 유료 OpenAI 호출을 비활성화합니다. 또한 `DART_API_KEY`, `SEC_USER_AGENT`를 설정해 공시 근거를 확보하세요. 기타 선택 키: `OPENAI_API_KEY`, `KIS_APP_KEY`, `KIS_APP_SECRET`.
+6. Vercel 프로젝트 `Settings > Environment Variables`에 **최소한 **설정할 필요가 없습니다**. 공개 앱에 개인 비밀번호를 입력하지 않습니다**합니다. 공개 버전은 분석 기능을 비밀번호 없이 제공하며 자동 AI 요약은 비활성화합니다. 미니 종목 질문 AI는 OPENAI_API_KEY를 서버 환경변수에 설정한 경우 사용자가 질문할 때만 호출합니다. 또한 `DART_API_KEY`, `SEC_USER_AGENT`를 설정해 공시 근거를 확보하세요. 기타 선택 키: `OPENAI_API_KEY`, `KIS_APP_KEY`, `KIS_APP_SECRET`.
 7. 환경변수 추가 후 `Redeploy`하고 `Visit`로 생성된 `https://...vercel.app` URL 접속.
 8. 비밀번호 입력 없이 삼성전자(005930), Apple(AAPL) 등으로 테스트합니다.
 
@@ -27,7 +27,7 @@
 - Yahoo Finance는 비공식 확정 일봉이고 Google News RSS는 헤드라인·발행시점만 가져옵니다. 데이터 API가 연결되지 않은 상태에서 **실시간 신호나 보고서 원문 분석을 제공하지 않습니다.**
 - 숫자로 표시한 매수 구간은 **실제 기업가치의 적정가가 아니라 기술 분석 가설**입니다. 거래 전 미래에셋 M-STOCK의 실제 시세와 원문을 확인하세요.
 - 무료 요금제에는 서버 함수 사용량 등 한도가 있으며 뉴스/AI API 호출 비용이나 라이선스 제약은 별도입니다.
-- GitHub 저장소는 Private로 유지하세요. 클라이언트와 API 통신은 HTTPS여도 공개 앱은 누구나 접속할 수 있으므로 호출량·비용 감시가 필요합니다. 이 버전은 유료 AI 호출을 차단합니다.
+- GitHub 저장소는 Private로 유지하세요. 클라이언트와 API 통신은 HTTPS여도 공개 앱은 누구나 접속할 수 있으므로 호출량·비용 감시가 필요합니다. 자동 AI 요약은 차단하고, 사용자가 요청한 종목 질문만 키가 있을 때 유료 AI를 호출합니다. 질문 호출 제한은 프로세스 단위이며 계정 전체의 과금 한도는 별도로 설정해야 합니다.
 
 ## 빠른 오류 점검
 - 429: 요청 제한에 도달했습니다. 잠시 후 다시 분석하세요.

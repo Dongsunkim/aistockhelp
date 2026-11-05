@@ -39,7 +39,8 @@ def build_evidence_pack(payload):
     for i,item in enumerate(payload.get('financials',[])[:10],1):
         url=_link(item.get('link'))
         if not url: continue
-        docs.append({'id':f'A{i}', 'kind':'공식 재무 수치', 'tier':'1차 공식 자료',
+        naver=item.get('source')=='네이버증권 기업실적분석'
+        docs.append({'id':f'A{i}', 'kind':'재무 집계 수치' if naver else '공식 재무 수치', 'tier':'네이버 집계 자료' if naver else '1차 공식 자료',
                      'title':f'{item.get("name", "재무계정")} · {item.get("period", "기간 미상")}',
                      'source':item.get('source') or '공시기관',
                      'published_at':item.get('reported_at') or item.get('period') or '', 'url':url,
@@ -58,12 +59,25 @@ def build_evidence_pack(payload):
     for i,item in enumerate(payload.get('research',[])[:8],1):
         url=_link(item.get('link'))
         if not url: continue
-        docs.append({'id':f'R{i}', 'kind':'리포트 관련 보도', 'tier':'3차 참고 자료',
+        report=item.get('type')=='research_report'
+        docs.append({'id':f'R{i}', 'kind':'증권사 리포트 목록' if report else '리포트 관련 보도', 'tier':'네이버 리서치 목록' if report else '3차 참고 자료',
                      'title':item.get('title') or '제목 미상', 'source':item.get('source') or '보도',
                      'published_at':item.get('published_at') or '', 'url':url,
-                     'level':'리포트 원문 미확인',
+                     'level':item.get('verification') or '리포트 원문 미확인',
                      'why':'증권사 전망 및 목표주가 변화 여부를 별도 원문과 비교하기 위한 후보 자료',
                      'warning':'보고서 원본 PDF를 읽은 것으로 간주하지 않습니다. 목표가를 매수가로 사용하지 않습니다.'})
+    macro=payload.get('macro') or {}
+    for i,(key,metric) in enumerate((macro.get('metrics') or {}).items(),1):
+        if not isinstance(metric,dict):continue
+        url=_link(metric.get('url'))
+        if not url:continue
+        docs.append({'id':f'M{i}','kind':'미국 경제·시장','tier':'경제·시장 관측 자료',
+                     'title':f'{key} · {metric.get("value")} {metric.get("unit", "")} · {metric.get("asof", "기준일 미상")}',
+                     'source':metric.get('source') or '경제·시세 제공원',
+                     'published_at':metric.get('asof') or '', 'url':url,
+                     'level':'관측값과 이전 관측 대비 변화 확인',
+                     'why':'미국 금리·원달러·물가·주요 지수와 종목의 시장 위험 확인',
+                     'warning':'관측일은 발표일과 다를 수 있으며 지수·주식은 확정 일봉 기준입니다.'})
     levels=analysis['levels']
     passes=sum(bool(c['pass']) for c in analysis['conditions'])
     total=len(analysis['conditions'])
@@ -71,9 +85,9 @@ def build_evidence_pack(payload):
     quality=payload.get('data_quality') or {}
     if quality and not quality.get('price_levels_eligible'):
         reasons=[
-            f'데이터 정확성 확인 전에는 매수 검토 구간, 손절가 및 목표가를 제시하지 않습니다. 상태: {analysis["status"]}',
-            '검증 항목: '+', '.join(quality.get('warnings',[])[:5]),
-            '이 분석은 국내 네이버 비공식 일봉과 공식 재무자료의 교차 확인을 필요로 합니다.'
+            f'가격 데이터 또는 산식에 문제가 있어 기술적 가격대를 표시하지 않습니다. 상태: {analysis["status"]}',
+            '검증 항목: '+', '.join(quality.get('price_level_blockers') or ['가격 데이터 검증 상태를 확인할 수 없습니다.']),
+            '일봉 출처·기준일과 진입·손절·저항 가격관계를 확인한 뒤 다시 조회하세요.'
         ]
     else:
         reasons=[

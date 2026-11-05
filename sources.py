@@ -10,10 +10,19 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
 BASE=os.path.dirname(__file__)
-_SESSION=requests.Session()
-_SESSION.headers.update({'User-Agent':'Mozilla/5.0 (personal educational stock signal app)'})
+_sessions=threading.local()
 _registry_lock=threading.Lock()
 _registry_cache={}
+
+
+def _get_session():
+    # requests.Session mutates headers/cookies and must not be shared by workers.
+    session=getattr(_sessions,'session',None)
+    if session is None:
+        session=requests.Session()
+        session.headers.update({'User-Agent':'Mozilla/5.0 (personal educational stock signal app)'})
+        _sessions.session=session
+    return session
 
 
 def yahoo_symbol(symbol: str, market: str) -> str:
@@ -36,7 +45,7 @@ def fetch_daily(symbol: str, market: str, *, history: str = "1y") -> tuple[pd.Da
         return fetch_naver_daily(symbol,market,history=history)
     ticker=yahoo_symbol(symbol,market)
     url=f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}'
-    response=_SESSION.get(url,params={'range':history,'interval':'1d','events':'div,splits'},timeout=12)
+    response=_get_session().get(url,params={'range':history,'interval':'1d','events':'div,splits'},timeout=12)
     response.raise_for_status()
     root=response.json().get('chart',{})
     if root.get('error'):
@@ -77,7 +86,7 @@ def fetch_daily(symbol: str, market: str, *, history: str = "1y") -> tuple[pd.Da
     return df,meta
 
 
-def fetch_news(search_term: str, market: str, limit: int = 12) -> list:
+def _fetch_news_rss(search_term: str, market: str, limit: int = 12) -> list:
     # Google News RSS provides metadata/headlines, NOT verified article text.
     search_term=search_term.strip()
     if not search_term or len(search_term)>80:
@@ -85,7 +94,7 @@ def fetch_news(search_term: str, market: str, limit: int = 12) -> list:
     lang={'US':('en-US','US','US:en'), 'KOSPI':('ko','KR','KR:ko'),'KOSDAQ':('ko','KR','KR:ko')}[market]
     query=f'{search_term} when:7d'
     url='https://news.google.com/rss/search?'+urlencode({'q':query,'hl':lang[0],'gl':lang[1],'ceid':lang[2]})
-    res=_SESSION.get(url,timeout=12)
+    res=_get_session().get(url,timeout=12)
     res.raise_for_status()
     root=ET.fromstring(res.content)
     now=datetime.now(timezone.utc)
@@ -103,7 +112,7 @@ def fetch_news(search_term: str, market: str, limit: int = 12) -> list:
         try:
             at=parsedate_to_datetime(date)
             if at.tzinfo is None: at=at.replace(tzinfo=timezone.utc)
-            age=max(0,round((now-at.astimezone(timezone.utc)).total_seconds()/3600,1))
+            age=(now-at.astimezone(timezone.utc)).total_seconds()/3600
             date=at.astimezone(timezone.utc).isoformat()
         except Exception:
             date=''
@@ -114,7 +123,7 @@ def fetch_news(search_term: str, market: str, limit: int = 12) -> list:
     return items
 
 
-def fetch_research_mentions(search_term: str, market: str, limit: int = 8) -> list:
+def _fetch_research_mentions_rss(search_term: str, market: str, limit: int = 8) -> list:
     """Research-related press coverage; NEVER present it as read research PDFs."""
     term=search_term.strip()
     if not term or len(term)>80:return []
@@ -125,7 +134,7 @@ def fetch_research_mentions(search_term: str, market: str, limit: int = 8) -> li
         query=f'"{term}" (증권사 리포트 OR 목표주가 OR 실적 전망) when:14d'
         lang=('ko','KR','KR:ko')
     url='https://news.google.com/rss/search?'+urlencode({'q':query,'hl':lang[0],'gl':lang[1],'ceid':lang[2]})
-    res=_SESSION.get(url,timeout=12)
+    res=_get_session().get(url,timeout=12)
     res.raise_for_status()
     root=ET.fromstring(res.content)
     now=datetime.now(timezone.utc)
@@ -156,7 +165,7 @@ def fetch_dart_filings(symbol: str, api_key: str, limit: int = 7) -> list:
     with _registry_lock:
         entry=_registry_cache.get(api_key)
         if not entry or (datetime.now(timezone.utc)-entry['at']).days>=1:
-            rr=_SESSION.get('https://opendart.fss.or.kr/api/corpCode.xml',params={'crtfc_key':api_key},timeout=25)
+            rr=_get_session().get('https://opendart.fss.or.kr/api/corpCode.xml',params={'crtfc_key':api_key},timeout=25)
             rr.raise_for_status()
             with zipfile.ZipFile(io.BytesIO(rr.content)) as z:
                 content=z.read(z.namelist()[0])
@@ -170,7 +179,7 @@ def fetch_dart_filings(symbol: str, api_key: str, limit: int = 7) -> list:
         raise ValueError('DART 고유번호를 찾지 못했습니다.')
     today=datetime.now(ZoneInfo('Asia/Seoul')).date()
     since=today-timedelta(days=150)
-    res=_SESSION.get('https://opendart.fss.or.kr/api/list.json',params={
+    res=_get_session().get('https://opendart.fss.or.kr/api/list.json',params={
         'crtfc_key':api_key,'corp_code':corp_code,
         'bgn_de':since.strftime('%Y%m%d'),'end_de':today.strftime('%Y%m%d'),
         'page_count':30,'sort':'date','sort_mth':'desc'},timeout=15)
@@ -193,13 +202,13 @@ def fetch_sec_filings(symbol: str, user_agent: str, limit:int=7) -> list:
     if not user_agent or '@' not in user_agent:
         raise ValueError('SEC_USER_AGENT 미설정: SEC는 연락 가능한 식별 User-Agent를 요구합니다.')
     headers={'User-Agent':user_agent,'Accept-Encoding':'gzip, deflate'}
-    mapping=_SESSION.get('https://www.sec.gov/files/company_tickers.json',headers=headers,timeout=12)
+    mapping=_get_session().get('https://www.sec.gov/files/company_tickers.json',headers=headers,timeout=12)
     mapping.raise_for_status()
     stock=symbol.upper()
     company=next((x for x in mapping.json().values() if x.get('ticker','').upper()==stock),None)
     if not company: raise ValueError('SEC 티커 매칭 실패: 해외 상장회사/ADR은 공시 체계가 다를 수 있습니다.')
     cik=int(company['cik_str'])
-    res=_SESSION.get(f'https://data.sec.gov/submissions/CIK{cik:010d}.json',headers=headers,timeout=12)
+    res=_get_session().get(f'https://data.sec.gov/submissions/CIK{cik:010d}.json',headers=headers,timeout=12)
     res.raise_for_status()
     filings=res.json()['filings']['recent']
     today=datetime.now(ZoneInfo('America/New_York')).date()
@@ -220,7 +229,7 @@ def fetch_sec_filings(symbol: str, user_agent: str, limit:int=7) -> list:
     return out
 
 
-def fetch_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_user_agent: str = '') -> list:
+def _fetch_official_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_user_agent: str = '') -> list:
     """Small set of *reported* financial facts, never inferred price targets.
 
     Domestic: OpenDART headline accounts from latest available official statement.
@@ -244,7 +253,7 @@ def fetch_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_u
         candidates.append((today.year-1,'11011','사업보고서'))
         candidates.append((today.year-1,'11014','3분기'))
         for year,code,label in candidates:
-            response=_SESSION.get('https://opendart.fss.or.kr/api/fnlttSinglAcnt.json',params={
+            response=_get_session().get('https://opendart.fss.or.kr/api/fnlttSinglAcnt.json',params={
                 'crtfc_key':dart_key,'corp_code':corp_code,
                 'bsns_year':str(year),'reprt_code':code},timeout=12)
             response.raise_for_status()
@@ -278,12 +287,12 @@ def fetch_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_u
     if not sec_user_agent or '@' not in sec_user_agent:
         raise ValueError('SEC_USER_AGENT 미설정')
     headers={'User-Agent':sec_user_agent,'Accept-Encoding':'gzip, deflate'}
-    mapping=_SESSION.get('https://www.sec.gov/files/company_tickers.json',headers=headers,timeout=12)
+    mapping=_get_session().get('https://www.sec.gov/files/company_tickers.json',headers=headers,timeout=12)
     mapping.raise_for_status()
     company=next((x for x in mapping.json().values() if x.get('ticker','').upper()==symbol.upper()),None)
     if not company:raise ValueError('SEC 상장기업 티커를 찾지 못했습니다.')
     cik=int(company['cik_str'])
-    response=_SESSION.get(f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json',headers=headers,timeout=15)
+    response=_get_session().get(f'https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json',headers=headers,timeout=15)
     response.raise_for_status()
     concepts=(response.json().get('facts') or {}).get('us-gaap') or {}
     specs=[('매출액',['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','SalesRevenueNet']),
@@ -311,6 +320,47 @@ def fetch_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_u
                     'basis':f'{selected["form"]} / 표준 US-GAAP 공시 수치; 회계기간 상이할 수 있음',
                     'link':f'https://www.sec.gov/edgar/browse/?CIK={cik}'})
     return out
+
+
+def _domestic_symbol(term,market):
+    return market in ('KOSPI','KOSDAQ') and bool(re.fullmatch(r'\d{6}',term.strip()))
+
+
+def _fallback_items(items,preferred,error):
+    return [dict(item,preferred_source=preferred,
+                 fallback_reason=preferred+' 조회 실패: '+str(error)[:120]) for item in items]
+
+
+def fetch_news(search_term: str, market: str, limit: int = 12) -> list:
+    if _domestic_symbol(search_term,market):
+        from naver_news import fetch_naver_news
+        try:return fetch_naver_news(search_term.strip(),session=_get_session(),limit=limit)
+        except (requests.RequestException,ValueError,KeyError,TypeError) as error:
+            return _fallback_items(_fetch_news_rss(search_term,market,limit),'네이버증권 종목뉴스',error)
+    return _fetch_news_rss(search_term,market,limit)
+
+
+def fetch_research_mentions(search_term: str, market: str, limit: int = 8) -> list:
+    if _domestic_symbol(search_term,market):
+        from naver_research import fetch_naver_research
+        try:return fetch_naver_research(search_term.strip(),session=_get_session(),limit=limit)
+        except (requests.RequestException,ValueError,KeyError,TypeError) as error:
+            return _fallback_items(_fetch_research_mentions_rss(search_term,market,limit),'네이버증권 리서치',error)
+    return _fetch_research_mentions_rss(search_term,market,limit)
+
+
+def fetch_financial_facts(symbol: str, market: str, *, dart_key: str = '', sec_user_agent: str = '') -> list:
+    if _domestic_symbol(symbol,market):
+        from naver_financials import fetch_naver_financials
+        try:return fetch_naver_financials(symbol,session=_get_session())
+        except (requests.RequestException,ValueError,KeyError,TypeError) as error:
+            try:
+                facts=_fetch_official_financial_facts(symbol,market,dart_key=dart_key,sec_user_agent=sec_user_agent)
+            except (requests.RequestException,ValueError,KeyError,TypeError) as official_error:
+                raise ValueError('네이버증권 재무 확인 실패: '+str(error)[:100]+
+                                 ' / 공식 자료 확인 실패: '+str(official_error)[:100]) from official_error
+            return _fallback_items(facts,'네이버증권 재무',error)
+    return _fetch_official_financial_facts(symbol,market,dart_key=dart_key,sec_user_agent=sec_user_agent)
 
 
 def summarize_with_openai(payload: dict) -> str:
