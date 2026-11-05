@@ -37,6 +37,24 @@
 
       <section class="status-bar" id="setup-state">설정 상태 확인 중…</section>
       <div id="app-message" role="status" class="notice" hidden></div>
+      <section class="card dart-panel" aria-labelledby="dart-heading">
+        <div class="section-heading"><div><div class="eyebrow">OPENDART · 공식 공시와 전체 재무제표</div><h2 id="dart-heading">DART 공시·재무 자료실</h2></div></div>
+        <p class="subtle">위에서 선택한 국내 종목을 조회합니다. 주가 분석 없이도 사용할 수 있습니다. 연결·별도 재무제표의 모든 제공 계정과 비교기간 금액을 확인하고, 공시는 다음 페이지까지 조회할 수 있습니다.</p>
+        <form id="dart-form" class="dart-controls">
+          <label for="dart-year">사업연도<input id="dart-year" type="number" min="2015" step="1" required/></label>
+          <label for="dart-report">재무 보고서<select id="dart-report"><option value="11011">사업보고서 (연간)</option><option value="11013">1분기보고서</option><option value="11012">반기보고서</option><option value="11014">3분기보고서</option></select></label>
+          <label for="dart-basis">재무제표 기준<select id="dart-basis"><option value="BOTH">연결·별도 모두</option><option value="CFS">연결 (CFS)</option><option value="OFS">별도 (OFS)</option></select></label>
+          <label for="dart-begin">공시 시작일<input id="dart-begin" type="date" required/></label>
+          <label for="dart-end">공시 종료일<input id="dart-end" type="date" required/></label>
+          <button id="dart-submit" class="secondary" type="submit">DART 공시·재무 조회</button>
+        </form>
+        <p class="small-note">공시 조회는 한 번에 최대 366일, 페이지당 최대 100건입니다. API 인증키는 서버 환경 설정에만 등록합니다. 주석·공시 본문의 내용은 원문 링크에서 별도로 확인하세요.</p>
+        <p id="dart-status" class="dart-status" role="status" aria-live="polite">국내 종목과 조회기간을 선택하세요.</p>
+        <div class="dart-results">
+          <section aria-labelledby="dart-financial-heading"><div class="section-heading"><h3 id="dart-financial-heading">전체 재무계정</h3><button id="dart-financial-download" class="text-btn" type="button" disabled>재무 JSON 저장</button></div><div id="dart-financial-status" role="status" aria-live="polite"></div><div id="dart-financial-results"></div></section>
+          <section aria-labelledby="dart-disclosure-heading"><div class="section-heading"><h3 id="dart-disclosure-heading">공시 목록</h3><button id="dart-disclosure-download" class="text-btn" type="button" disabled>조회한 공시 JSON 저장</button></div><div id="dart-disclosure-status" role="status" aria-live="polite"></div><div id="dart-disclosure-results" class="dart-disclosures"></div><div class="dart-page-actions"><button id="dart-more" class="secondary" type="button" hidden>다음 공시 100건 불러오기</button><button id="dart-all" class="secondary" type="button" hidden>공시 전체 불러오기</button></div></section>
+        </div>
+      </section>
       <div id="empty-state" class="empty-state"><div class="empty-icon">⌁</div><h2>분석할 종목을 선택하세요</h2><p>과거 확정 일봉과 최신 기사·공시의 메타데이터를 비교합니다.<br/>가격은 가설이며 매수 판단의 확정 근거가 아닙니다.</p></div>
 
       <div id="result-area" hidden>
@@ -75,5 +93,6 @@
     </main>
   </div>
   <script defer src="/static/app.js?v=041r"></script>
+  <script defer src="/static/dart.js?v=1"></script>
 </body>
 </html>

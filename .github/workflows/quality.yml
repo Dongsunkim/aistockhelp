@@ -24,4 +24,8 @@ jobs:
       - name: Unit tests
         run: python -m pytest -q
       - name: JavaScript syntax
-        run: node --check static/app.js
+        run: |
+          node --check static/app.js
+          node --check static/dart.js
+      - name: DART interface regressions
+        run: node tests/dart_ui_smoke.cjs

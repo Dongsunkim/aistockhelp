@@ -13,6 +13,16 @@ def number(v):
     return f
 
 def xml_rows(content):
+    # FCHART declares EUC-KR. Expat cannot parse multibyte legacy encodings
+    # directly, so decode according to the XML declaration before parsing.
+    if isinstance(content, bytes):
+        declaration=re.match(br'''\s*<\?xml\b[^>]*\bencoding\s*=\s*["']([^"']+)["']''',
+                             content[:512],re.IGNORECASE)
+        if declaration:
+            try:
+                content=content.decode(declaration.group(1).decode('ascii'))
+            except (LookupError,UnicodeError):
+                raise ValueError('네이버 XML 문자 인코딩을 해석할 수 없습니다.') from None
     root=ET.fromstring(content)
     rows=[]
     for i in root.findall(".//item"):
@@ -75,13 +85,19 @@ def fetch_naver_daily(symbol,market,*,history="1y",session=None):
         errors.append("FCHART:"+str(e)[:70])
     try:
         allrows=[]
-        for page in range(1,5 if history=="1y" else 12):
+        # The mobile endpoint rejects oversized pages. Keep its small page size
+        # while requesting enough pages for the same history as FCHART.
+        page_size=20
+        target_count=330 if history=="1y" else 1000
+        page_count=(target_count+page_size-1)//page_size
+        for page in range(1,page_count+1):
             r=s.get(f"https://m.stock.naver.com/api/stock/{symbol}/price",
-                    params={"page":page,"pageSize":100},headers=HEADERS,timeout=8)
+                    params={"page":page,"pageSize":page_size},headers=HEADERS,timeout=8)
             r.raise_for_status();chunk=mobile_rows(r.json())
             if not chunk:break
-            allrows.extend(chunk)
-            if len(chunk)<100:break
+            if len(chunk)>page_size:raise ValueError("모바일 응답 페이지 크기 오류")
+            allrows.extend(chunk[:target_count-len(allrows)])
+            if len(chunk)<page_size:break
         df=validated(allrows,history)
         return df,meta(df,symbol,market,"NAVER_MOBILE")
     except (requests.RequestException,ValueError,TypeError,KeyError) as e:

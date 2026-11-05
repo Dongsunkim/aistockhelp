@@ -2,7 +2,9 @@
 from __future__ import annotations
 from pathlib import Path
 import os, sqlite3, time, threading
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Literal
+from zoneinfo import ZoneInfo
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -18,6 +20,7 @@ from quotes import configured as kis_configured, fetch_kis_quote
 from backtest import backtest_technical
 from naver_history import fetch_naver_quote
 from data_quality import check as audit_data
+from dart_client import DartError, fetch_dart_financials, fetch_dart_disclosures
 
 ROOT=Path(__file__).parent
 ON_VERCEL=bool(os.getenv("VERCEL")) or bool(os.getenv("VERCEL_ENV"))
@@ -59,7 +62,8 @@ _limiter = {}
 
 @app.middleware('http')
 async def public_resource_guard(request: Request, call_next):
-    if ON_VERCEL and request.method == 'POST' and request.url.path in ('/api/analyze','/api/backtest'):
+    if ON_VERCEL and request.method == 'POST' and request.url.path in (
+        '/api/analyze','/api/backtest','/api/dart/financials','/api/dart/disclosures'):
         from fastapi.responses import JSONResponse
         client = request.client.host if request.client else 'unknown'
         now = time.monotonic()
@@ -119,6 +123,57 @@ def list_watchlist():
         return [dict(r) for r in con.execute('SELECT * FROM watchlist ORDER BY id DESC').fetchall()]
 
 
+class DartFinancialReq(BaseModel):
+    symbol: str = Field(pattern=r'^[0-9]{6}$')
+    year: int = Field(ge=2015, le=datetime.now(ZoneInfo('Asia/Seoul')).year)
+    report_code: Literal['11011','11012','11013','11014'] = '11011'
+    fs_div: Literal['BOTH','CFS','OFS'] = 'BOTH'
+
+
+class DartDisclosuresReq(BaseModel):
+    symbol: str = Field(pattern=r'^[0-9]{6}$')
+    begin: date
+    end: date
+    page: int = Field(default=1, ge=1, le=1000)
+
+
+def dart_key():
+    key = os.environ.get('DART_API_KEY') or os.environ.get('DART_API','')
+    if not key:
+        raise HTTPException(status_code=503, detail='DART 인증키가 없습니다. 환경 설정에 DART_API_KEY를 등록하세요. 키를 브라우저에 입력하지 마세요.')
+    return key
+
+
+@app.post('/api/dart/financials')
+def dart_financials(req: DartFinancialReq):
+    """Full accounts are separate from the three facts used by the price-quality gate."""
+    key = dart_key()
+    try:
+        return fetch_dart_financials(req.symbol, key, year=req.year,
+                                    report_code=req.report_code, fs_div=req.fs_div)
+    except DartError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    except (requests.RequestException, ValueError):
+        # Never expose requests' credential-bearing query URLs or provider text.
+        raise HTTPException(status_code=502, detail='DART 재무조회 실패: 인증키·API 한도·네트워크 허용 상태와 종목을 확인하세요.') from None
+
+
+@app.post('/api/dart/disclosures')
+def dart_disclosures(req: DartDisclosuresReq):
+    if req.end < req.begin or (req.end - req.begin).days > 366:
+        raise HTTPException(status_code=422, detail='공시 조회기간은 시작일부터 종료일까지 최대 366일입니다.')
+    if req.end > datetime.now(ZoneInfo('Asia/Seoul')).date():
+        raise HTTPException(status_code=422, detail='공시 종료일은 오늘 이후로 지정할 수 없습니다.')
+    key = dart_key()
+    try:
+        return fetch_dart_disclosures(req.symbol, key, begin=req.begin.isoformat(),
+                                     end=req.end.isoformat(), page=req.page)
+    except DartError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    except (requests.RequestException, ValueError):
+        raise HTTPException(status_code=502, detail='DART 공시조회 실패: 인증키·API 한도·네트워크 허용 상태와 종목을 확인하세요.') from None
+
+
 @app.post('/api/watchlist')
 def add_watchlist(req:WatchReq):
     if ON_VERCEL: raise HTTPException(status_code=501, detail='Vercel은 브라우저 로컬 관심종목을 사용합니다.')
@@ -158,12 +213,14 @@ def run_analysis(symbol:str,name:str,market:str,with_ai:bool=False):
         if market=='US':filings=fetch_sec_filings(symbol,os.environ.get('SEC_USER_AGENT',''))
         else: filings=fetch_dart_filings(symbol,(os.environ.get('DART_API_KEY') or os.environ.get('DART_API','')))
     except (requests.RequestException,ValueError,KeyError,TypeError,Exception) as e:
-        filings_err='공시 확인 불가: '+str(e)[:160]
+        filings_err=('공시 확인 불가: OpenDART 인증키·조회 한도·네트워크 상태를 확인하세요.'
+                     if market!='US' else '공시 확인 불가: '+str(e)[:160])
     try:
         financials=fetch_financial_facts(symbol,market,dart_key=(os.environ.get('DART_API_KEY') or os.environ.get('DART_API','')),
                                          sec_user_agent=os.environ.get('SEC_USER_AGENT',''))
     except (requests.RequestException,ValueError,KeyError,TypeError) as e:
-        financials_err='재무계정 확인 불가: '+str(e)[:160]
+        financials_err=('재무계정 확인 불가: OpenDART 인증키·조회 한도·네트워크 상태를 확인하세요.'
+                        if market!='US' else '재무계정 확인 불가: '+str(e)[:160])
     result=analyze_bars(bars,market=market,news=news,filings=filings,
                         news_error=news_err,filings_error=filings_err)
     bundle={'symbol':symbol.upper().strip(),'company_name':name or symbol,
