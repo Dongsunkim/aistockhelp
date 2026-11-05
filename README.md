@@ -13,3 +13,5 @@
 실행: `pip install -r requirements.txt` 후 `uvicorn app:app --reload`. 테스트: `python -m pytest -q`.
 
 OpenDART와 SEC API 키는 Vercel 환경변수로만 제공하고 GitHub에 커밋하지 마세요.
+
+Vercel에서 DART 인증키는 `DART_API_KEY`(권장) 또는 `DART_API`(기존 프로젝트 호환)로 설정합니다. 실제 값은 GitHub에 올리지 않습니다.
