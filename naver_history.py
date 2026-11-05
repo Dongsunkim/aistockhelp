@@ -87,3 +87,28 @@ def fetch_naver_daily(symbol,market,*,history="1y",session=None):
     except (requests.RequestException,ValueError,TypeError,KeyError) as e:
         errors.append("MOBILE:"+str(e)[:70])
         raise ValueError("네이버 일봉 검증 실패. 국내 Yahoo 대체 조회 금지. "+"; ".join(errors))
+
+
+def fetch_naver_quote(symbol,session=None):
+    """Unverified-timeliness Naver snapshot; never label it exchange-certified live."""
+    if not re.fullmatch(r"\d{6}",symbol):
+        raise ValueError("국내 6자리 종목코드 필요")
+    s=session or requests.Session()
+    r=s.get(f"https://polling.finance.naver.com/api/realtime/domestic/stock/{symbol}",
+            headers=HEADERS,timeout=5)
+    r.raise_for_status()
+    obj=r.json()
+    data=obj.get("datas") if isinstance(obj,dict) else None
+    if not isinstance(data,list) or not data or not isinstance(data[0],dict):
+        raise ValueError("네이버 현재가 응답 구조 확인 실패")
+    q=data[0]
+    returned=q.get("itemCode") or q.get("code")
+    if returned and returned!=symbol:
+        raise ValueError("요청 종목과 응답 종목이 다릅니다.")
+    price=number(q.get("closePrice"))
+    if price<=0:raise ValueError("비정상 현재가")
+    return {"provider":"네이버증권 비공식 시세","price":price,
+            "fetched_at":datetime.now(timezone.utc).isoformat(),
+            "exchange_timestamp":q.get("localTradedAt"),
+            "verified_live":False,
+            "note":"실시간 체결 인증이 없는 네이버 참고 시세입니다."}
