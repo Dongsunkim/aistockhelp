@@ -1,0 +1,27 @@
+name: StockDesk recovery checks
+on:
+  push:
+    branches: [main, "release/**", "recovery/**"]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -r requirements.txt "pytest>=8,<10" "httpx>=0.27,<1"
+      - name: Python compile
+        run: python -m compileall -q app.py naver_history.py data_quality.py sources.py evidence.py tests
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: JavaScript syntax
+        run: node --check static/app.js
