@@ -161,3 +161,19 @@ def test_legacy_analyze_remains_a_fresh_complete_request(monkeypatch):
     assert response.status_code == 200
     assert daily.call_count == 2
     assert 'cache' not in response.json()
+
+
+def test_unconfigured_optional_us_quote_does_not_prevent_completed_result_cache(monkeypatch):
+    import app as module
+    client, _, _ = install_offline_sources(monkeypatch, market='US')
+    monkeypatch.setattr(module, 'kis_configured', lambda: False)
+    daily = count_daily(monkeypatch)
+    first = stream(client, symbol='AAPL', name='Apple', market='US')[-1]['result']
+    assert first['completion']['status'] == 'complete'
+    assert 'quote' not in first['completion']['unavailable_sources']
+    assert '미연결' in first['quote_error']
+    second = stream(client, symbol='AAPL', name='Apple', market='US')
+    assert len(second) == 1
+    assert second[0]['result']['cache']['hit'] is True
+    assert second[0]['result']['quote_error'] == first['quote_error']
+    assert daily.call_count == 1

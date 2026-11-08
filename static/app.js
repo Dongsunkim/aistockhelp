@@ -33,6 +33,7 @@ async function health(){try{const r=await api('/api/health');const c=r.configure
 function setSelection(market,symbol,name){el('market').value=market;el('symbol').value=symbol;el('company-name').value=name;}
 const ANALYSIS_SOURCES={news:'기사',research:'리서치',filings:'공시',financials:'재무',quote:'현재가',macro:'미국 경제'};
 const DECISION_SOURCES=['news','filings','financials','macro'];
+const ANALYSIS_TIMEOUT_MS=22000;
 async function streamAnalysis(body,signal,onUpdate){
   const response=await fetch('/api/analyze/stream',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify(body),signal});
   if(signal.aborted){const error=new Error('분석 요청이 변경되었습니다.');error.name='AbortError';throw error;}
@@ -47,6 +48,8 @@ async function streamAnalysis(body,signal,onUpdate){
   }
   if(!response.body?.getReader)throw new Error('분석 연결을 읽지 못했습니다. 다시 분석해 주세요.');
   const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
+  const cancelReader=()=>{try{Promise.resolve(reader.cancel()).catch(()=>{});}catch{}};
+  signal.addEventListener('abort',cancelReader,{once:true});
   let buffer='',complete=false;
   const consume=line=>{
     if(!line.trim())return;
@@ -67,8 +70,9 @@ async function streamAnalysis(body,signal,onUpdate){
     }
     if(!complete)throw new Error('분석 연결이 끊겼습니다. 다시 분석해 주세요.');
   }finally{
-    try{await reader.cancel();}catch{}
-    reader.releaseLock();
+    signal.removeEventListener('abort',cancelReader);
+    cancelReader();
+    try{reader.releaseLock();}catch{}
   }
 }
 async function runAnalyze(){
@@ -84,6 +88,8 @@ async function runAnalyze(){
   el('backtest-button').disabled=true;
   el('backtest-button').textContent='최근 3년 기술적 전략 검증';
   el('result-area').hidden=true;
+  el('analysis-failure').hidden=true;
+  el('analysis-completion').hidden=true;
   el('empty-state').hidden=true;
   el('loading-state').hidden=false;
   el('loading-name').textContent=(name||symbol)+' 분석 중';
@@ -92,14 +98,25 @@ async function runAnalyze(){
   el('analysis-details').open=false;
   el('result-area').setAttribute('aria-busy','true');
   const btn=el('analyze-btn');btn.disabled=true;btn.textContent='분석 중…';
-  let displayed=false,completed=false;
+  let displayed=false,completed=false,lastResult=null,pendingSources=[],timeoutId,abortHandler;
+  const interrupted=new Promise((resolve,reject)=>{
+    abortHandler=()=>{const error=new Error('분석 요청이 변경되었습니다.');error.name='AbortError';reject(error);};
+    controller.signal.addEventListener('abort',abortHandler,{once:true});
+    timeoutId=setTimeout(()=>{
+      const error=new Error('서버 응답 시간이 초과되었습니다. 잠시 뒤 다시 분석해 주세요.');
+      error.name='AnalysisTimeoutError';
+      reject(error);
+      controller.abort();
+    },ANALYSIS_TIMEOUT_MS);
+  });
   try{
-    await streamAnalysis({market,symbol,name,with_ai:false},controller.signal,update=>{
+    const task=streamAnalysis({market,symbol,name,with_ai:false},controller.signal,update=>{
       if(request!==analysisRequest || controller.signal.aborted)return;
       const r=update.result;
       if(r.symbol!==symbol || r.market!==market)throw new Error('요청한 종목과 분석 응답이 다릅니다. 다시 분석해 주세요.');
       const partial=update.stage==='partial';
       drawResult(r,{initializeQA:false,pendingSources:update.pending_sources,partial});
+      lastResult=r;pendingSources=update.pending_sources;
       if(!partial){
         current=r;completed=true;
         if(typeof resetStockQA==='function')resetStockQA(r);
@@ -109,22 +126,35 @@ async function runAnalyze(){
       el('result-area').hidden=false;
       if(!displayed){el('result-area').scrollIntoView({behavior:'smooth',block:'start'});displayed=true;}
     });
+    await Promise.race([task,interrupted]);
   }catch(e){
-    if(request!==analysisRequest || e.name==='AbortError')return;
+    if(request!==analysisRequest)return;
+    const detail=['TypeError','AbortError'].includes(e.name)?'분석 연결이 중단되었습니다. 다시 분석해 주세요.':e.message;
     if(displayed && !completed){
-      el('decision-headline').textContent='일부 자료만 확인됨 · 다시 분석해 주세요';
-      el('decision-label').textContent='확인 미완료';
+      drawDecision(lastResult);
+      drawPendingSources(pendingSources,true);
+      el('decision-headline').textContent='필수 자료 확인 불가로 매수 판단 보류';
+      el('decision-label').textContent='판단 보류';
       el('decision-card').dataset.tone='hold';
-      el('decision-next').textContent='아래에서 확인된 차트를 볼 수 있습니다. 종합 판단을 확인하려면 다시 분석해 주세요.';
-      el('signal-status').textContent='종합 확인 미완료';
+      el('decision-reasons').innerHTML='<li>확인된 확정 일봉의 차트와 참고 가격대는 아래에서 볼 수 있습니다.</li><li>분석 연결이 중단되어 종합 판단에 필요한 자료 확인을 마치지 못했습니다.</li>';
+      el('decision-next').textContent='자료가 부족해 지금 매수를 권할 근거가 충분하지 않습니다. 다시 분석해 주세요.';
+      el('signal-status').textContent='필수 자료 확인 불가 · 매수 판단 보류';
       el('signal-status').className='status-pill hold';
-      el('quality-status').textContent='종합 자료 확인 미완료';
-      el('analysis-progress').hidden=false;
-      el('analysis-progress').dataset.state='error';
-      el('analysis-progress').textContent='자료 확인이 중단되었습니다. 종합 판단과 AI 질문은 아직 준비되지 않았습니다.';
-    }else el('empty-state').hidden=false;
-    say(e.name==='TypeError'?'분석 연결을 읽지 못했습니다. 다시 분석해 주세요.':e.message,true);
+      el('quality-status').textContent='필수 자료 확인 불가 · 매수 판단 보류';
+      el('analysis-progress').hidden=true;
+      el('analysis-completion').hidden=false;
+      el('analysis-completion').dataset.state='error';
+      el('analysis-completion').textContent=detail+(pendingSources.length?' 확인하지 못한 자료: '+pendingSources.map(source=>ANALYSIS_SOURCES[source]).join('·')+'.':'')+' 연결이 중단되어 AI 질문은 열리지 않았습니다.';
+    }else if(!completed){
+      el('empty-state').hidden=true;
+      el('analysis-failure-detail').textContent=(name||symbol)+' · '+detail;
+      el('analysis-failure').hidden=false;
+      el('analysis-failure').scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
+    if(!completed)say(detail,true);
   }finally{
+    clearTimeout(timeoutId);
+    controller.signal.removeEventListener('abort',abortHandler);
     if(request===analysisRequest){
       el('loading-state').hidden=true;
       el('result-area').setAttribute('aria-busy','false');
@@ -159,29 +189,38 @@ function drawDecision(r,pendingSources=[],partial=false){
       el('signal-status').className='status-pill hold';
     }
   }
+  drawCompletion(r,partial);
   const progress=el('analysis-progress');
   progress.hidden=!partial;
   progress.dataset.state='loading';
   if(partial){
     const pending=[...new Set(pendingSources)],done=Object.keys(ANALYSIS_SOURCES).length-pending.length;
-    progress.textContent=(decisionReady?'핵심 자료 점검 완료 · ':'차트 계산 완료 · ')+`자료 점검 ${done}/6 완료`+(pending.length?' · '+(decisionReady?'추가 ':'')+pending.map(source=>ANALYSIS_SOURCES[source]).join('·')+' 확인 중':' · 결과 정리 중')+' · AI 질문은 전체 확인 후 열립니다.';
+    progress.textContent=(decisionReady?'핵심 자료 점검 완료 · ':'차트 계산 완료 · ')+`자료 점검 ${done}/6 완료`+(pending.length?' · '+(decisionReady?'추가 ':'')+pending.map(source=>ANALYSIS_SOURCES[source]).join('·')+' 확인 중':' · 결과 정리 중')+' · AI 질문은 결과 정리 후 열립니다.';
   }
   el('decision-source-link').textContent=r.market==='US'?'Yahoo 시세 출처 확인 ↗':'네이버 증권에서 확인 ↗';
   el('decision-source-link').href=r.market==='US'?'https://finance.yahoo.com/quote/'+encodeURIComponent(r.symbol):'https://finance.naver.com/item/main.naver?code='+encodeURIComponent(r.symbol);
   el('decision-asof').textContent=`${r.analysis.date} 확정 종가 ${nf(r.analysis.close,r.market)} ${currency(r.market)} 기준 · 실시간 판단이 아닙니다.`;
   if(r.cache?.hit===true)el('decision-asof').textContent=`${Math.max(0,Math.floor(Number(r.cache.age_seconds)||0))}초 전 조회 자료 · 기준시각 ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · `+el('decision-asof').textContent;
 }
-function drawPendingSources(pendingSources){
+function drawCompletion(r,partial=false){
+  const completion=r.completion||{},notice=el('analysis-completion');
+  const missing=[...new Set([...(completion.timed_out_sources||[]),...(completion.unavailable_sources||[])])].filter(source=>Object.hasOwn(ANALYSIS_SOURCES,source));
+  notice.hidden=partial || (completion.status!=='partial' && !missing.length);
+  notice.dataset.state='partial';
+  if(!notice.hidden)notice.textContent='확인된 자료로 분석을 마쳤습니다. '+(completion.message||'일부 자료를 확인하지 못해 판단에 제한이 있습니다.')+(missing.length?' 확인하지 못한 자료: '+missing.map(source=>ANALYSIS_SOURCES[source]).join('·')+'.':'')+' 누락된 자료와 판단 근거를 AI에 질문할 수 있습니다.';
+}
+function drawPendingSources(pendingSources,interrupted=false){
   for(const [source,id] of Object.entries({news:'news-list',filings:'filings-list',research:'research-list',financials:'financials-list'})){
-    if(pendingSources.includes(source))el(id).innerHTML=`<div class="source-empty">${escapeHtml(ANALYSIS_SOURCES[source])} 자료 확인 중…</div>`;
+    if(pendingSources.includes(source))el(id).innerHTML=`<div class="source-empty">${escapeHtml(ANALYSIS_SOURCES[source])} 자료 ${interrupted?'확인 불가 · 연결이 중단되었습니다.':'확인 중…'}</div>`;
   }
   if(pendingSources.includes('macro')){
-    el('macro-status').textContent='확인 중';
-    el('macro-summary').textContent='미국 금리·환율·물가·주요 주식 자료를 확인하고 있습니다.';
+    el('macro-status').textContent=interrupted?'확인 불가':'확인 중';
+    el('macro-summary').textContent=interrupted?'연결이 중단되어 미국 금리·환율·물가·주요 주식 자료를 모두 확인하지 못했습니다.':'미국 금리·환율·물가·주요 주식 자료를 확인하고 있습니다.';
+    if(interrupted)el('macro-warnings').innerHTML='<li>미국 경제·시장 필수 자료 조회가 중단되었습니다.</li>';
   }
   if(pendingSources.includes('quote')){
-    el('quote-value').textContent='현재가 확인 중';
-    el('quote-info').textContent='현재가는 추가 참고 자료입니다. 차트는 확정 일봉으로 계산합니다.';
+    el('quote-value').textContent=interrupted?'현재가 확인 불가':'현재가 확인 중';
+    el('quote-info').textContent=interrupted?'연결이 중단되어 현재가를 확인하지 못했습니다.':'현재가는 추가 참고 자료입니다. 차트는 확정 일봉으로 계산합니다.';
   }
   if(DECISION_SOURCES.some(source=>pendingSources.includes(source)))el('quality-status').textContent='종합 자료 확인 중';
 }
@@ -225,7 +264,7 @@ function drawEvidence(pack){
   documents.innerHTML=docs.length?docs.map(d=>`<a class="evidence-document" href="${escapeHtml(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer"><div class="document-main"><span class="document-tier">${escapeHtml(d.tier)}</span> <strong>[${escapeHtml(d.id)}] ${escapeHtml(d.title)}</strong></div><div class="document-meta">${escapeHtml(d.source)} · ${escapeHtml(d.published_at||'발행일 미상')} · ${escapeHtml(d.level)}</div><p>용도: ${escapeHtml(d.why)}</p><small>한계: ${escapeHtml(d.warning)}</small></a>`).join(''):'<p class="source-empty">조회 가능한 문서가 없습니다. 자료 부재는 매수 근거가 아닙니다.</p>';
 }
 async function loadWatchlist(){try{const entries=await api('/api/watchlist');el('watchlist-items').innerHTML=entries.length?entries.map(w=>`<div class="watch-item"><div><strong>${escapeHtml(w.name)} <span class="subtle">${escapeHtml(w.symbol)}</span></strong><small>${escapeHtml(marketName(w.market))} · 매수 관찰 ≤ ${escapeHtml(w.buy_below??'미설정')} · 매도 관찰 ≥ ${escapeHtml(w.sell_above??'미설정')}</small></div><div class="watch-actions"><button class="analyze-watch" data-id="${w.id}" title="분석">분석</button><button class="delete-watch" data-id="${w.id}" title="삭제">×</button></div></div>`).join(''):'<div class="subtle">관심 종목이 아직 없습니다. 위에서 종목을 분석한 뒤 등록할 수 있습니다.</div>';el('watchlist-items').querySelectorAll('.analyze-watch').forEach(btn=>btn.addEventListener('click',()=>{const w=entries.find(x=>x.id===Number(btn.dataset.id));setSelection(w.market,w.symbol,w.name);runAnalyze();}));el('watchlist-items').querySelectorAll('.delete-watch').forEach(btn=>btn.addEventListener('click',async()=>{if(!confirm('관심 종목을 삭제할까요?'))return;try{await api(`/api/watchlist/${btn.dataset.id}`,'DELETE');loadWatchlist()}catch(e){say(e.message,true)}}));}catch(e){el('watchlist-items').textContent='관심종목 조회 오류: '+e.message;}}
-el('analyze-form').addEventListener('submit',e=>{e.preventDefault();runAnalyze()});el('watch-form').addEventListener('submit',async e=>{e.preventDefault();if(!current){say('먼저 종목을 분석하세요.',true);return;}const buy=el('watch-buy').value,sell=el('watch-sell').value;try{await api('/api/watchlist','POST',{symbol:current.symbol,name:current.company_name,market:current.market,buy_below:buy?Number(buy):null,sell_above:sell?Number(sell):null});say(cloudMode?'관심 종목을 이 브라우저에 저장했습니다. 자동 알림은 아직 연결되지 않았습니다.':'관심 종목을 저장했습니다. 알림을 받으려면 별도 감시 프로세스가 필요합니다.');loadWatchlist();}catch(e){say(e.message,true)}});el('refresh-watch').addEventListener('click',loadWatchlist);document.querySelectorAll('.quick-picks button').forEach(btn=>btn.addEventListener('click',()=>{setSelection(btn.dataset.market,btn.dataset.symbol,btn.dataset.name);runAnalyze()}));health().then(loadWatchlist);
+el('analysis-retry').addEventListener('click',()=>runAnalyze());el('analyze-form').addEventListener('submit',e=>{e.preventDefault();runAnalyze()});el('watch-form').addEventListener('submit',async e=>{e.preventDefault();if(!current){say('먼저 종목을 분석하세요.',true);return;}const buy=el('watch-buy').value,sell=el('watch-sell').value;try{await api('/api/watchlist','POST',{symbol:current.symbol,name:current.company_name,market:current.market,buy_below:buy?Number(buy):null,sell_above:sell?Number(sell):null});say(cloudMode?'관심 종목을 이 브라우저에 저장했습니다. 자동 알림은 아직 연결되지 않았습니다.':'관심 종목을 저장했습니다. 알림을 받으려면 별도 감시 프로세스가 필요합니다.');loadWatchlist();}catch(e){say(e.message,true)}});el('refresh-watch').addEventListener('click',loadWatchlist);document.querySelectorAll('.quick-picks button').forEach(btn=>btn.addEventListener('click',()=>{setSelection(btn.dataset.market,btn.dataset.symbol,btn.dataset.name);runAnalyze()}));health().then(loadWatchlist);
 
 
 async function runBacktest(){

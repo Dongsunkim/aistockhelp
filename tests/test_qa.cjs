@@ -29,6 +29,7 @@ function page() {
   const context=vm.createContext({
     document:{getElementById:id=>elements[id],createElement:tag=>new Element(tag)},
     URL,AbortController,
+    setTimeout(...args){const timer=setTimeout(...args);timer.unref();return timer;},clearTimeout,
     fetch(url,options) {
       const pending=deferred();requests.push({url,options,...pending});return pending.promise;
     }

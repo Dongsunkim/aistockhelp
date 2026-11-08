@@ -44,6 +44,11 @@ input,select,button{min-height:46px} .quality-panel{margin-bottom:18px;border-le
 .loading-state p{margin:5px 0 0;color:var(--sub)}
 .analysis-progress{padding:12px 14px;margin:12px 0;border-radius:8px;background:#eef5fb;color:#315979;line-height:1.65;overflow-wrap:anywhere}
 .analysis-progress[data-state="error"]{background:#fff4ef;color:#a04d3d}
+.analysis-completion{padding:12px 14px;margin:12px 0;border:1px solid #e9d4b0;border-radius:8px;background:#fff8eb;color:#795e32;line-height:1.65;overflow-wrap:anywhere}
+.analysis-completion[data-state="error"]{background:#fff4ef;border-color:#eccdc3;color:#a04d3d}
+.analysis-failure{margin-bottom:18px;border-top:4px solid #91a4b5;overflow-wrap:anywhere}
+.analysis-failure h2{font-size:26px;line-height:1.4;margin:0 0 12px}
+.analysis-failure p{color:var(--sub);line-height:1.7}
 .decision-card[data-tone="hold"]{border-top-color:#91a4b5}
 .mini-qa input:disabled,.mini-qa button:disabled{opacity:.65;cursor:wait}
 .loading-indicator{width:28px;height:28px;border:3px solid #dce8f2;border-top-color:var(--blue);border-radius:50%;flex-shrink:0;animation:loading-spin 1s linear infinite}

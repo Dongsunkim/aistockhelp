@@ -4,6 +4,7 @@
 (function () {
   const ids=['qa-form','qa-input','qa-submit','qa-answer','qa-notice','qa-sources','qa-result','qa-heading'];
   const nodes=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
+  const QA_TIMEOUT_MS=40000;
   let selected=null;
   let version=0;
   let pending=null;
@@ -74,15 +75,36 @@
     nodes['qa-submit'].disabled=true;
     nodes['qa-submit'].textContent='답변 중…';
     nodes['qa-form'].setAttribute('aria-busy','true');
+    let timeoutId,abortHandler,timedOut=false;
+    const interrupted=new Promise((resolve,reject)=>{
+      abortHandler=()=>{
+        clearTimeout(timeoutId);
+        const error=new Error('질문 요청이 변경되었습니다.');
+        error.name='AbortError';
+        reject(error);
+      };
+      controller.signal.addEventListener('abort',abortHandler,{once:true});
+      timeoutId=setTimeout(()=>{
+        timedOut=true;
+        const error=new Error('답변 시간이 초과되었습니다. 잠시 뒤 다시 질문해 주세요.');
+        error.name='QATimeoutError';
+        reject(error);
+        controller.abort();
+      },QA_TIMEOUT_MS);
+    });
     try {
-      const response=await fetch('/api/ask',{
-        method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
-        body:JSON.stringify({symbol:stock.symbol,market:stock.market,name:stock.name,question})
-      });
-      if(!isCurrent())return;
-      if(!response.ok)throw new Error(response.status===429?'질문이 많습니다. 잠시 뒤 다시 시도해 주세요.':'답변을 불러오지 못했습니다. 잠시 뒤 다시 질문해 주세요.');
-      const answer=await response.json();
-      if(!isCurrent())return;
+      const task=(async()=>{
+        const response=await fetch('/api/ask',{
+          method:'POST',headers:{'Content-Type':'application/json'},signal:controller.signal,
+          body:JSON.stringify({symbol:stock.symbol,market:stock.market,name:stock.name,question})
+        });
+        if(!isCurrent() || controller.signal.aborted)return;
+        if(!response.ok)throw new Error(response.status===429?'질문이 많습니다. 잠시 뒤 다시 시도해 주세요.':'답변을 불러오지 못했습니다. 잠시 뒤 다시 질문해 주세요.');
+        return response.json();
+      })();
+      // Race the whole response body too: a transport may ignore cancellation.
+      const answer=await Promise.race([task,interrupted]);
+      if(!isCurrent() || controller.signal.aborted)return;
       if(!answer || !['ai','data_only','unavailable'].includes(answer.mode))
         throw new Error('답변 형식을 확인하지 못했습니다. 다시 질문해 주세요.');
       if(answer.mode==='unavailable') {
@@ -100,10 +122,13 @@
       nodes['qa-notice'].textContent=label+notice+asof;
       renderSources(answer.sources);
     } catch(error) {
-      if(!isCurrent() || controller.signal.aborted || error.name==='AbortError')return;
-      showUnavailable(error instanceof Error && error.message.startsWith('질문이 많습니다.')?
+      if(!isCurrent() || (controller.signal.aborted && !timedOut))return;
+      showUnavailable(timedOut?'답변 시간이 초과되었습니다. 잠시 뒤 다시 질문해 주세요.':
+        error instanceof Error && error.message.startsWith('질문이 많습니다.')?
         error.message:'답변을 불러오지 못했습니다. 잠시 뒤 다시 질문해 주세요.');
     } finally {
+      clearTimeout(timeoutId);
+      controller.signal.removeEventListener('abort',abortHandler);
       if(isCurrent()) {
         pending=null;
         nodes['qa-submit'].disabled=false;

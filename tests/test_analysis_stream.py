@@ -294,10 +294,10 @@ def test_disconnect_interrupts_an_active_wait_for_a_slow_source(monkeypatch):
         finally:
             news_finished.set()
 
-    def track_wait(jobs, cancelled):
+    def track_wait(jobs, cancelled, deadline=None):
         if sent_first_body.is_set() and not any(job.done() for job in jobs):
             waiting_for_news.set()
-        return original_done(jobs, cancelled)
+        return original_done(jobs, cancelled, deadline)
 
     class TrackedPool(ThreadPoolExecutor):
         def shutdown(self, wait=True, *, cancel_futures=False):

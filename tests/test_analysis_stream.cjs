@@ -294,7 +294,10 @@ for (const ending of ['interrupted', 'closed', 'malformed', 'error stage']) {
     assert.equal(p.elements.get('qa-input').disabled, true);
     assert.equal(p.qaResets.length, 1);
     assert.equal(p.elements.get('analyze-btn').disabled, false, 'the user must be able to retry');
-    assert.match(p.elements.get('decision-headline').textContent + ' ' + p.elements.get('analysis-progress').textContent, /확인 중|미완료|완료하지 못|중단|끝내지 못/);
+    assert.equal(p.elements.get('decision-headline').textContent, '필수 자료 확인 불가로 매수 판단 보류');
+    assert.equal(p.elements.get('analysis-progress').hidden, true);
+    assert.equal(p.elements.get('analysis-completion').hidden, false);
+    assert.doesNotMatch(p.elements.get('decision-sources').innerHTML, /확인 중/);
     assert.equal(p.elements.get('app-message').hidden, false);
   });
 }

@@ -31,7 +31,7 @@ ROOT=Path(__file__).parent
 ON_VERCEL=bool(os.getenv("VERCEL")) or bool(os.getenv("VERCEL_ENV"))
 load_dotenv(ROOT/'.env')
 DB=Path(os.environ.get('SIGNAL_DB',str(ROOT/'signals.sqlite3')))
-app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.4.3-fast')
+app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.4.4-results')
 app.mount('/static',StaticFiles(directory=str(ROOT/'static')),name='static')
 
 
@@ -153,7 +153,7 @@ def home(): return FileResponse(ROOT/'static/index.html')
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.4.3-fast','time_utc':datetime.now(timezone.utc).isoformat(),
+    return {'status':'ok','version':'0.4.4-results','time_utc':datetime.now(timezone.utc).isoformat(),
             'serverless': ON_VERCEL, 'requires_password': False, 'public_no_login': True,
             'watchlist_storage': 'browser_local' if ON_VERCEL else 'sqlite',
             'configured':{'dart':bool(os.environ.get('DART_API_KEY') or os.environ.get('DART_API')),
@@ -248,6 +248,10 @@ def delete_watch(item_id:int):
 
 
 _SOURCE_ORDER=('news','research','filings','financials','quote','macro')
+# Bound the complete source collection, including every provider's fallbacks.
+ANALYSIS_TIMEOUT_SECONDS=12
+_SOURCE_LABELS={'news':'뉴스','research':'증권사 리서치','filings':'공시',
+                'financials':'재무 자료','quote':'현재가','macro':'미국 경제 자료'}
 
 
 def _start_analysis_jobs(symbol,name,market):
@@ -278,6 +282,7 @@ def _start_analysis_jobs(symbol,name,market):
 def _analysis_source_state():
     return {'news':[],'research':[],'filings':[],'financials':[],
             'news_error':None,'research_error':None,'filings_error':None,'financials_error':None,
+            'macro_error':None,'quote_configured':None,
             'quote_error':'현재가 확인 중입니다. 확정 종가를 먼저 표시합니다.',
             'macro':{'eligible':False,'summary':'미국 경제 자료를 확인하고 있습니다.','metrics':{},
                      'risk_flags':[],'warnings':['미국 금리·환율·물가·주요 종목 확인 중'],
@@ -287,8 +292,10 @@ def _analysis_source_state():
 def _read_analysis_source(kind,job,market,state,*,safe_errors=False):
     """Record one resolved provider. Pending sources never contribute verified evidence."""
     if job is None:
+        state['quote_configured']=False
         state['quote_error']='시세 API 미연결: 확정 종가만 표시합니다.'
         return True
+    if kind=='quote':state['quote_configured']=True
     try:
         value=job.result()
     except Exception as error:
@@ -311,6 +318,7 @@ def _read_analysis_source(kind,job,market,state,*,safe_errors=False):
             prefix='네이버 현재가 미검증: ' if market in ('KOSPI','KOSDAQ') else 'KIS 시세 조회 실패: '
             state['quote_error']=prefix+message[:150 if market in ('KOSPI','KOSDAQ') else 170]
         elif kind=='macro':
+            state['macro_error']='미국 경제 자료 조회 실패: '+message[:160]
             state['macro']={'eligible':False,'summary':'미국 경제 자료를 확인하지 못했습니다.','metrics':{},
                             'risk_flags':[],'warnings':['미국 금리·환율·물가·주요 종목 자료 조회 실패'],
                             'checked_at':datetime.now(timezone.utc).isoformat()}
@@ -331,6 +339,7 @@ def _assemble_analysis(symbol,name,market,bars,meta,state,*,with_ai=False):
             'filings':filings,'research':state['research'],'financials':financials,
             'financials_error':state['financials_error'],'news_error':state['news_error'],
             'filings_error':state['filings_error'],'research_error':state['research_error'],
+            'macro_error':state['macro_error'],
             'chart': [{'date':str(row['date']),'close':round(float(row['close']),4)}
                       for _,row in bars.tail(120).iterrows()]}
     if 'quote' in state:bundle['quote']=state['quote']
@@ -354,17 +363,72 @@ def _assemble_analysis(symbol,name,market,bars,meta,state,*,with_ai=False):
     return bundle
 
 
+def _timeout_analysis_sources(pending,state):
+    timed_out=list(pending)
+    for kind,job in pending.items():
+        job.cancel()
+        message=f'{_SOURCE_LABELS[kind]} 조회 시간 초과: 이번 결과에는 반영하지 않았습니다.'
+        state[kind+'_error']=message
+        if kind=='macro':
+            state['macro']={'eligible':False,'summary':'미국 경제 자료 조회 시간이 초과되었습니다.',
+                            'metrics':{},'risk_flags':[],'warnings':[message],
+                            'checked_at':datetime.now(timezone.utc).isoformat()}
+    pending.clear()
+    return timed_out
+
+
+def _analysis_completion(state,timed_out=(),*,pending_sources=()):
+    pending=bool(pending_sources)
+    # An optional quote API with no configuration made no request that could fail.
+    # Its visible quote_error remains, while valid core results may still be reused.
+    unavailable=[kind for kind in _SOURCE_ORDER if kind not in pending_sources
+                 and not (kind=='quote' and state.get('quote_configured') is False)
+                 and (state.get(kind+'_error')
+                      or (kind=='macro' and not state['macro'].get('eligible')))]
+    if pending:
+        message='가격 자료를 먼저 표시합니다. 추가 판단 근거를 확인하고 있습니다.'
+    elif unavailable:
+        labels='·'.join(_SOURCE_LABELS[kind] for kind in unavailable)
+        message=f'확인된 자료로 결과를 표시했습니다. {labels} 자료를 확인하지 못했습니다.'
+    else:
+        message='자료 조회를 마쳤습니다. 각 자료의 검증 상태를 확인해 주세요.'
+    return {'status':'partial' if pending or unavailable else 'complete',
+            'timed_out_sources':list(timed_out),'unavailable_sources':unavailable,
+            'message':message}
+
+
+def _resolve_analysis_sources(pending,done,market,state,*,safe_errors=False):
+    for kind in list(pending):
+        if pending[kind] in done:
+            _read_analysis_source(kind,pending.pop(kind),market,state,safe_errors=safe_errors)
+
+
+def _analysis_daily(jobs,cancelled,deadline):
+    if not _analysis_done((jobs['daily'],),cancelled,deadline):
+        jobs['daily'].cancel()
+        raise _AnalysisDailyTimeout('가격 자료 조회 시간 초과: 확인된 일봉이 없어 분석 결과를 만들 수 없습니다. 잠시 뒤 다시 시도해 주세요.')
+    return jobs['daily'].result()
+
+
 def run_analysis(symbol:str,name:str,market:str,with_ai:bool=False):
+    deadline=time.monotonic()+ANALYSIS_TIMEOUT_SECONDS
     pool,jobs=_start_analysis_jobs(symbol,name,market)
     state=_analysis_source_state()
+    timed_out=[]
     try:
-        # Preserve the complete-response API and its fatal daily-bar error behavior.
-        bars,meta=jobs['daily'].result()
-        for kind in _SOURCE_ORDER:
-            _read_analysis_source(kind,jobs[kind],market,state)
+        bars,meta=_analysis_daily(jobs,None,deadline)
+        pending={kind:jobs[kind] for kind in _SOURCE_ORDER if jobs[kind] is not None}
+        if jobs['quote'] is None:_read_analysis_source('quote',None,market,state)
+        while pending:
+            done=_analysis_done(tuple(pending.values()),None,deadline)
+            if not done:
+                timed_out=_timeout_analysis_sources(pending,state)
+                break
+            _resolve_analysis_sources(pending,done,market,state)
     finally:
         pool.shutdown(wait=False,cancel_futures=True)
     bundle=_assemble_analysis(symbol,name,market,bars,meta,state,with_ai=with_ai)
+    bundle['completion']=_analysis_completion(state,timed_out)
     _remember_context(bundle)
     return bundle
 
@@ -406,12 +470,19 @@ class _AnalysisCancelled(Exception):
     pass
 
 
-def _analysis_done(jobs,cancelled):
-    if cancelled is None:
-        return wait(jobs,return_when=FIRST_COMPLETED)[0]
-    # Poll only for disconnect cleanup; provider requests keep their own timeouts.
-    while not cancelled.is_set():
-        done,_=wait(jobs,timeout=0.1,return_when=FIRST_COMPLETED)
+class _AnalysisDailyTimeout(requests.Timeout):
+    pass
+
+
+def _analysis_done(jobs,cancelled,deadline=None):
+    while cancelled is None or not cancelled.is_set():
+        # Keep observations which already arrived, even at the budget boundary.
+        done={job for job in jobs if job.done()}
+        if done:return done
+        remaining=None if deadline is None else deadline-time.monotonic()
+        if remaining is not None and remaining<=0:return set()
+        timeout=(min(0.1,remaining) if remaining is not None else 0.1) if cancelled is not None else remaining
+        done,_=wait(jobs,timeout=timeout,return_when=FIRST_COMPLETED)
         if done:return done
     raise _AnalysisCancelled()
 
@@ -431,29 +502,33 @@ def iter_analysis_events(symbol,name,market,with_ai=False,refresh=False,*,cancel
                 _remember_context(cached)
                 yield {'stage':'complete','result':cached,'pending_sources':[]}
                 return
+        deadline=time.monotonic()+ANALYSIS_TIMEOUT_SECONDS
         pool,jobs=_start_analysis_jobs(symbol,name,market)
         state=_analysis_source_state()
-        _analysis_done((jobs['daily'],),cancelled)
-        bars,meta=jobs['daily'].result()
+        bars,meta=_analysis_daily(jobs,cancelled,deadline)
         pending={kind:jobs[kind] for kind in _SOURCE_ORDER if jobs[kind] is not None}
         if jobs['quote'] is None:_read_analysis_source('quote',None,market,state)
         # This first yield never waits for news, filings, financials, quote or macro.
         bundle=_assemble_analysis(symbol,name,market,bars,meta,state)
         bundle['cache']={'hit':False,'age_seconds':0,'stored_at':None}
+        bundle['completion']=_analysis_completion(state,pending_sources=pending)
         yield {'stage':'partial','result':bundle,'pending_sources':list(pending)}
-        successful=True
+        timed_out=[]
         while pending:
-            done=_analysis_done(tuple(pending.values()),cancelled)
-            for kind in list(pending):
-                if pending[kind] in done:
-                    successful=_read_analysis_source(kind,pending.pop(kind),market,state,safe_errors=True) and successful
+            done=_analysis_done(tuple(pending.values()),cancelled,deadline)
+            if done:
+                _resolve_analysis_sources(pending,done,market,state,safe_errors=True)
+            else:
+                timed_out=_timeout_analysis_sources(pending,state)
             final=not pending
             bundle=_assemble_analysis(symbol,name,market,bars,meta,state,with_ai=with_ai and final)
             bundle['cache']={'hit':False,'age_seconds':0,'stored_at':None}
+            bundle['completion']=_analysis_completion(state,timed_out,pending_sources=pending)
             if final:
                 # Failed providers and incomplete macro observations are deliberately
                 # retried on the next request, instead of being hidden by the cache.
-                if (successful and not with_ai and bundle['data_quality']['price_levels_eligible']
+                if (bundle['completion']['status']=='complete' and not with_ai
+                        and bundle['data_quality']['price_levels_eligible']
                         and state['macro'].get('eligible') is True):
                     bundle['cache']=_store_stream_analysis(key,bundle)
                 _remember_context(bundle)
@@ -461,6 +536,8 @@ def iter_analysis_events(symbol,name,market,with_ai=False,refresh=False,*,cancel
                    'pending_sources':list(pending)}
     except _AnalysisCancelled:
         return
+    except _AnalysisDailyTimeout as error:
+        yield {'stage':'error','result':None,'pending_sources':[],'detail':str(error)}
     except Exception:
         # Provider exception text may contain URLs, credentials or response bodies.
         yield {'stage':'error','result':None,'pending_sources':[],
