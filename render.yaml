@@ -1,0 +1,27 @@
+# Optional dedicated monitoring host. Review Render service/disk charges before deploying.
+services:
+  - type: web
+    name: stockdesk-monitor
+    runtime: docker
+    dockerfilePath: ./Dockerfile.monitor
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /health
+    autoDeploy: false
+    disk:
+      name: stockdesk-alert-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: SIGNAL_ALERT_DB
+        value: /data/alerts.sqlite3
+      - key: ALERT_ACCESS_TOKEN
+        generateValue: true
+      - key: ALERT_POLL_SECONDS
+        value: "15"
+      - key: KIS_APP_KEY
+        sync: false
+      - key: KIS_APP_SECRET
+        sync: false
+      - key: DART_API_KEY
+        sync: false

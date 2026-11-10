@@ -9,7 +9,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 import requests
 import anyio
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,13 +26,16 @@ from data_quality import check as audit_data
 from macro_data import fetch_macro_context
 from stock_qa import answer_question
 from dart_client import DartError, fetch_dart_financials, fetch_dart_disclosures
+from stock_lookup import known_stocks, search_stocks, resolve_stock, StockLookupUnavailable
 
 ROOT=Path(__file__).parent
 ON_VERCEL=bool(os.getenv("VERCEL")) or bool(os.getenv("VERCEL_ENV"))
 load_dotenv(ROOT/'.env')
 DB=Path(os.environ.get('SIGNAL_DB',str(ROOT/'signals.sqlite3')))
-app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.4.4-results')
+app=FastAPI(title='보수적 AI 주식 가격알림 비서',version='0.5.0-monitor')
 app.mount('/static',StaticFiles(directory=str(ROOT/'static')),name='static')
+from alert_api import router as alerts_router
+app.include_router(alerts_router)
 
 
 def getdb():
@@ -147,13 +150,43 @@ def check_symbol(symbol,market):
     except ValueError as e: raise HTTPException(status_code=422,detail=str(e))
 
 
+def canonical_stock_request(req):
+    """Validate identity before collecting evidence or accepting saved labels."""
+    check_symbol(req.symbol,req.market)
+    try:
+        identity=resolve_stock(req.symbol,req.market,getattr(req,'name',''))
+    except StockLookupUnavailable as error:
+        raise HTTPException(status_code=503,detail=str(error)) from None
+    except ValueError as error:
+        raise HTTPException(status_code=422,detail=str(error)) from None
+    values={key:identity[key] for key in ('symbol','market')}
+    if hasattr(req,'name'):values['name']=identity['name']
+    return req.model_copy(update=values)
+
+
+@app.get('/api/stocks/catalog')
+def stock_catalog():
+    return {'items':known_stocks()}
+
+
+@app.get('/api/stocks/search')
+def stock_search(q:str=Query(min_length=1,max_length=80),
+                 market:Literal['KOSPI','KOSDAQ','US']|None=None,
+                 limit:int=Query(default=8,ge=1,le=20)):
+    try:return {'items':search_stocks(q,market=market,limit=limit)}
+    except StockLookupUnavailable as error:
+        raise HTTPException(status_code=503,detail=str(error)) from None
+    except ValueError as error:
+        raise HTTPException(status_code=422,detail=str(error)) from None
+
+
 @app.get('/')
 def home(): return FileResponse(ROOT/'static/index.html')
 
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'0.4.4-results','time_utc':datetime.now(timezone.utc).isoformat(),
+    return {'status':'ok','version':app.version,'time_utc':datetime.now(timezone.utc).isoformat(),
             'serverless': ON_VERCEL, 'requires_password': False, 'public_no_login': True,
             'watchlist_storage': 'browser_local' if ON_VERCEL else 'sqlite',
             'configured':{'dart':bool(os.environ.get('DART_API_KEY') or os.environ.get('DART_API')),
@@ -227,7 +260,7 @@ def dart_disclosures(req: DartDisclosuresReq):
 @app.post('/api/watchlist')
 def add_watchlist(req:WatchReq):
     if ON_VERCEL: raise HTTPException(status_code=501, detail='Vercel은 브라우저 로컬 관심종목을 사용합니다.')
-    check_symbol(req.symbol,req.market)
+    req=canonical_stock_request(req)
     symbol=req.symbol.upper().strip()
     with getdb() as con:
         con.execute('''INSERT INTO watchlist(symbol,name,market,buy_below,sell_above,created_at)
@@ -599,7 +632,7 @@ class _AnalysisStreamingResponse(StreamingResponse):
 
 @app.post('/api/analyze')
 def analyze(req:AnalyzeReq):
-    check_symbol(req.symbol,req.market)
+    req=canonical_stock_request(req)
     try: return run_analysis(req.symbol,req.name,req.market,req.with_ai)
     except (requests.RequestException,ValueError,IndexError,KeyError) as e:
         raise HTTPException(status_code=502,detail='시세 분석 실패: '+str(e)[:250])
@@ -607,7 +640,7 @@ def analyze(req:AnalyzeReq):
 
 @app.post('/api/analyze/stream')
 def analyze_stream(req:AnalyzeReq):
-    check_symbol(req.symbol,req.market)
+    req=canonical_stock_request(req)
     cancelled=threading.Event()
     events=iter_analysis_events(req.symbol,req.name,req.market,req.with_ai,req.refresh,cancelled=cancelled)
     return _AnalysisStreamingResponse(events,cancelled)
@@ -622,7 +655,7 @@ class AskReq(BaseModel):
 
 @app.post('/api/ask')
 def ask_stock(req:AskReq):
-    check_symbol(req.symbol,req.market)
+    req=canonical_stock_request(req)
     if len(req.question.strip())<2:
         raise HTTPException(status_code=422,detail='궁금한 점을 두 글자 이상 입력해 주세요.')
     context=_recent_context(req.symbol,req.market,req.name)

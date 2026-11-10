@@ -6,6 +6,7 @@ const nf=(x,market)=>x==null?'—':Number(x).toLocaleString('ko-KR',{minimumFrac
 let current=null;
 let analysisRequest=0;
 let analysisController=null;
+let selectionResolveRequest=0;
 let cloudMode=false;
 const LOCAL_WATCH_KEY='signaldesk.v03.watchlist';
 function localWatch(path, method='GET', body) {
@@ -29,8 +30,29 @@ const currency=x=>x==='US'?'USD':'KRW';
 function say(message,error=false){const m=el('app-message');m.textContent=message;m.hidden=false;m.style.background=error?'#fff4ef':'#eef5fd';m.style.color=error?'#a04d3d':'#376080';m.scrollIntoView({behavior:'smooth',block:'nearest'});}
 function clearMessage(){el('app-message').hidden=true;}
 async function api(path,method='GET',body,signal){if(cloudMode && path.startsWith('/api/watchlist'))return localWatch(path,method,body);const headers={'Content-Type':'application/json'};const rsp=await fetch(path,{method,headers,signal,body:body?JSON.stringify(body):undefined});let payload;try{payload=await rsp.json()}catch{throw new Error('서버 응답을 읽지 못했습니다.')}if(!rsp.ok)throw new Error(payload.detail||`서버 오류 ${rsp.status}`);return payload;}
-async function health(){try{const r=await api('/api/health');const c=r.configured;cloudMode=!!r.serverless;el('watch-help').textContent=cloudMode?'관심 종목은 현재 브라우저에만 저장됩니다. 자동 알림은 아직 연결되지 않았습니다.':'관심 종목과 관찰 가격을 저장할 수 있습니다. 자동 알림은 아직 연결되지 않았습니다.';el('setup-state').textContent=`연동 상태 · DART ${c.dart?'설정됨':'키 필요'} / KIS 시세 ${c.kis_quote?'설정됨':'미연결'} / SEC ${c.sec?'설정됨':'식별 정보 필요'} / AI 요약 ${c.ai?'로컬 전용':'공개 앱 비활성'} / 텔레그램 ${c.telegram?'설정됨':'설정 필요'} · 기술분석은 확정 일봉이며 추가 REST 시세는 최신성 검증이 필요합니다.`;}catch(e){el('setup-state').textContent='연동 상태를 확인할 수 없습니다.';}}
-function setSelection(market,symbol,name){el('market').value=market;el('symbol').value=symbol;el('company-name').value=name;}
+async function health(){try{const r=await api('/api/health');const c=r.configured;cloudMode=!!r.serverless;el('watch-help').textContent=cloudMode?'관심 목록은 현재 브라우저에 저장됩니다. 가격 알림은 위의 매매 타이밍 알림에서 등록하세요.':'관심 목록과 관찰 가격을 저장합니다. 가격 알림은 위의 매매 타이밍 알림에서 등록하세요.';el('setup-state').textContent=`연동 상태 · DART ${c.dart?'설정됨':'키 필요'} / KIS 시세 ${c.kis_quote?'설정됨':'미연결'} / SEC ${c.sec?'설정됨':'식별 정보 필요'} / AI 요약 ${c.ai?'로컬 전용':'공개 앱 비활성'} / 텔레그램 ${c.telegram?'설정됨':'설정 필요'} · 기술분석은 확정 일봉이며 추가 REST 시세는 최신성 검증이 필요합니다.`;}catch(e){el('setup-state').textContent='연동 상태를 확인할 수 없습니다.';}}
+function invalidateCurrentSelection(){
+  if(typeof resetAlertSelection==='function')resetAlertSelection();
+  ++selectionResolveRequest;
+  ++analysisRequest;
+  analysisController?.abort();
+  analysisController=null;
+  current=null;
+  if(typeof resetStockQA==='function')resetStockQA(null);
+  el('result-area').hidden=true;
+  el('result-area').setAttribute('aria-busy','false');
+  el('analysis-failure').hidden=true;
+  el('loading-state').hidden=true;
+  el('empty-state').hidden=false;
+  el('backtest-button').disabled=true;
+  el('analyze-btn').disabled=false;
+  el('analyze-btn').innerHTML='매수 시점 확인 <span>↗</span>';
+  clearMessage();
+}
+function setSelection(market,symbol,name){
+  if(typeof stockSearchSelectionChanged==='function')stockSearchSelectionChanged(market,symbol,name);
+  else{el('market').value=market;el('symbol').value=symbol;el('company-name').value=name;}
+}
 const ANALYSIS_SOURCES={news:'기사',research:'리서치',filings:'공시',financials:'재무',quote:'현재가',macro:'미국 경제'};
 const DECISION_SOURCES=['news','filings','financials','macro'];
 const ANALYSIS_TIMEOUT_MS=22000;
@@ -77,6 +99,11 @@ async function streamAnalysis(body,signal,onUpdate){
 }
 async function runAnalyze(){
   clearMessage();
+  const selectionAttempt=++selectionResolveRequest;
+  if(typeof resolveCurrentStockSelection==='function'){
+    const selection=await resolveCurrentStockSelection();
+    if(!selection || selectionAttempt!==selectionResolveRequest)return;
+  }
   const market=el('market').value,symbol=el('symbol').value.trim().toUpperCase(),name=el('company-name').value.trim();
   if(!symbol){say('종목코드를 입력하세요.',true);return;}
   const request=++analysisRequest;
@@ -252,7 +279,7 @@ function drawPriceLevels(levels,market,quality){
   el('stop-legend').hidden=!eligible;
   return eligible?levels:null;
 }
-function drawResult(r,{initializeQA=true,pendingSources=[],partial=false}={}){const a=r.analysis,levels=a.levels,m=r.market;el('result-market').textContent=marketName(m)+' · '+r.symbol;el('result-name').textContent=r.company_name||r.symbol;el('result-date').textContent=`최종 확정 일봉 ${a.date} · ${r.cache?.hit===true?Math.max(0,Math.floor(Number(r.cache.age_seconds)||0))+'초 전 조회 자료 · 기준시각':'조회'} ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · ${r.meta.provider}`;el('close-price').textContent=nf(a.close,m)+' '+currency(m);el('signal-status').textContent=a.status;el('signal-status').className='status-pill '+(a.confirmed?'ok':a.status.includes('보류')||a.status.includes('확인')?'hold':'no');const q=r.data_quality||{};el('quality-status').textContent=q.status||'검증 상태 미확인';el('quality-warnings').innerHTML=(q.warnings||['품질 상태 미확인']).map(v=>'<li>'+escapeHtml(v)+'</li>').join('');const chartLevels=drawPriceLevels(levels,m,q);drawDecision(r,pendingSources,partial);drawMacro(r.macro);if(initializeQA && typeof resetStockQA==='function')resetStockQA(r);el('pass-count').textContent=a.conditions.filter(x=>x.pass).length+' / '+a.conditions.length+'개 충족';showChecks('condition-list',a.conditions);showChecks('evidence-check-list',a.evidence_checks);el('formula-list').innerHTML=Object.entries(a.method).filter(([k])=>k!=='caveat').map(([k,v])=>`<div class="method-item"><strong>${escapeHtml({'entry':'매수가 범위','stop':'손절 기준','target':'목표/저항','risk_reward':'손익비 산식'}[k]||k)}</strong><div>${escapeHtml(v)}</div></div>`).join('');el('formula-caveat').textContent=a.method.caveat;const red=el('red-flags');red.hidden=!a.red_flags.length;red.textContent=a.red_flags.length?`주의: 최근 기사 제목에서 위험 키워드 ${a.red_flags.length}건 감지 · ${a.red_flags.slice(0,2).join(' / ')} · 문맥 확인 전 판단 보류`:' ';sourcesList('news-list',r.news,r.news_error);sourcesList('filings-list',r.filings,r.filings_error);sourcesList('research-list',r.research||[],r.research_error);const fitems=r.financials||[];el('financials-list').innerHTML=fitems.length?fitems.map(f=>`<a class="source-item" href="${escapeHtml(safeUrl(f.link))}" target="_blank" rel="noopener noreferrer"><div class="source-title">${escapeHtml(f.name)} · ${escapeHtml(Number(f.value).toLocaleString('ko-KR'))} ${escapeHtml(f.unit)}</div><div class="source-meta">${escapeHtml(f.period)} · ${escapeHtml(f.source)} · ${escapeHtml(f.basis)}</div></a>`).join(''):`<div class="source-empty">${escapeHtml(r.financials_error||'적합한 재무계정이 조회되지 않았습니다.')}</div>`;el('quote-value').textContent=r.quote?nf(r.quote.price,m)+' '+currency(m):'연결된 현재가 없음';
+function drawResult(r,{initializeQA=true,pendingSources=[],partial=false}={}){if(typeof setAlertAnalysis==='function')setAlertAnalysis(r);const a=r.analysis,levels=a.levels,m=r.market;el('result-market').textContent=marketName(m)+' · '+r.symbol;el('result-name').textContent=r.company_name||r.symbol;el('result-date').textContent=`최종 확정 일봉 ${a.date} · ${r.cache?.hit===true?Math.max(0,Math.floor(Number(r.cache.age_seconds)||0))+'초 전 조회 자료 · 기준시각':'조회'} ${new Date(r.meta.fetched_at).toLocaleString('ko-KR')} · ${r.meta.provider}`;el('close-price').textContent=nf(a.close,m)+' '+currency(m);el('signal-status').textContent=a.status;el('signal-status').className='status-pill '+(a.confirmed?'ok':a.status.includes('보류')||a.status.includes('확인')?'hold':'no');const q=r.data_quality||{};el('quality-status').textContent=q.status||'검증 상태 미확인';el('quality-warnings').innerHTML=(q.warnings||['품질 상태 미확인']).map(v=>'<li>'+escapeHtml(v)+'</li>').join('');const chartLevels=drawPriceLevels(levels,m,q);drawDecision(r,pendingSources,partial);drawMacro(r.macro);if(initializeQA && typeof resetStockQA==='function')resetStockQA(r);el('pass-count').textContent=a.conditions.filter(x=>x.pass).length+' / '+a.conditions.length+'개 충족';showChecks('condition-list',a.conditions);showChecks('evidence-check-list',a.evidence_checks);el('formula-list').innerHTML=Object.entries(a.method).filter(([k])=>k!=='caveat').map(([k,v])=>`<div class="method-item"><strong>${escapeHtml({'entry':'매수가 범위','stop':'손절 기준','target':'목표/저항','risk_reward':'손익비 산식'}[k]||k)}</strong><div>${escapeHtml(v)}</div></div>`).join('');el('formula-caveat').textContent=a.method.caveat;const red=el('red-flags');red.hidden=!a.red_flags.length;red.textContent=a.red_flags.length?`주의: 최근 기사 제목에서 위험 키워드 ${a.red_flags.length}건 감지 · ${a.red_flags.slice(0,2).join(' / ')} · 문맥 확인 전 판단 보류`:' ';sourcesList('news-list',r.news,r.news_error);sourcesList('filings-list',r.filings,r.filings_error);sourcesList('research-list',r.research||[],r.research_error);const fitems=r.financials||[];el('financials-list').innerHTML=fitems.length?fitems.map(f=>`<a class="source-item" href="${escapeHtml(safeUrl(f.link))}" target="_blank" rel="noopener noreferrer"><div class="source-title">${escapeHtml(f.name)} · ${escapeHtml(Number(f.value).toLocaleString('ko-KR'))} ${escapeHtml(f.unit)}</div><div class="source-meta">${escapeHtml(f.period)} · ${escapeHtml(f.source)} · ${escapeHtml(f.basis)}</div></a>`).join(''):`<div class="source-empty">${escapeHtml(r.financials_error||'적합한 재무계정이 조회되지 않았습니다.')}</div>`;el('quote-value').textContent=r.quote?nf(r.quote.price,m)+' '+currency(m):'연결된 현재가 없음';
   el('quote-info').textContent=r.quote?`${r.quote.provider} · 조회 ${new Date(r.quote.fetched_at).toLocaleString('ko-KR')} · ${r.quote.exchange_timestamp?'체결시각 '+r.quote.exchange_timestamp:'체결시각 검증 불가'} · ${r.quote.verified_live?'5분 이내 체결시각 확인':'실시간 매매 기준으로 검증되지 않음'} · ${r.quote.note}`:(r.quote_error||'KIS 시세 API 미연결.');
   el('ai-content').textContent=r.ai_summary||r.ai_error||'규칙 기반 근거를 검토하세요.';drawEvidence(r.evidence_pack);drawChart(r.chart,chartLevels,m);if(partial)drawPendingSources(pendingSources);}
 function drawEvidence(pack){
@@ -264,7 +291,7 @@ function drawEvidence(pack){
   documents.innerHTML=docs.length?docs.map(d=>`<a class="evidence-document" href="${escapeHtml(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer"><div class="document-main"><span class="document-tier">${escapeHtml(d.tier)}</span> <strong>[${escapeHtml(d.id)}] ${escapeHtml(d.title)}</strong></div><div class="document-meta">${escapeHtml(d.source)} · ${escapeHtml(d.published_at||'발행일 미상')} · ${escapeHtml(d.level)}</div><p>용도: ${escapeHtml(d.why)}</p><small>한계: ${escapeHtml(d.warning)}</small></a>`).join(''):'<p class="source-empty">조회 가능한 문서가 없습니다. 자료 부재는 매수 근거가 아닙니다.</p>';
 }
 async function loadWatchlist(){try{const entries=await api('/api/watchlist');el('watchlist-items').innerHTML=entries.length?entries.map(w=>`<div class="watch-item"><div><strong>${escapeHtml(w.name)} <span class="subtle">${escapeHtml(w.symbol)}</span></strong><small>${escapeHtml(marketName(w.market))} · 매수 관찰 ≤ ${escapeHtml(w.buy_below??'미설정')} · 매도 관찰 ≥ ${escapeHtml(w.sell_above??'미설정')}</small></div><div class="watch-actions"><button class="analyze-watch" data-id="${w.id}" title="분석">분석</button><button class="delete-watch" data-id="${w.id}" title="삭제">×</button></div></div>`).join(''):'<div class="subtle">관심 종목이 아직 없습니다. 위에서 종목을 분석한 뒤 등록할 수 있습니다.</div>';el('watchlist-items').querySelectorAll('.analyze-watch').forEach(btn=>btn.addEventListener('click',()=>{const w=entries.find(x=>x.id===Number(btn.dataset.id));setSelection(w.market,w.symbol,w.name);runAnalyze();}));el('watchlist-items').querySelectorAll('.delete-watch').forEach(btn=>btn.addEventListener('click',async()=>{if(!confirm('관심 종목을 삭제할까요?'))return;try{await api(`/api/watchlist/${btn.dataset.id}`,'DELETE');loadWatchlist()}catch(e){say(e.message,true)}}));}catch(e){el('watchlist-items').textContent='관심종목 조회 오류: '+e.message;}}
-el('analysis-retry').addEventListener('click',()=>runAnalyze());el('analyze-form').addEventListener('submit',e=>{e.preventDefault();runAnalyze()});el('watch-form').addEventListener('submit',async e=>{e.preventDefault();if(!current){say('먼저 종목을 분석하세요.',true);return;}const buy=el('watch-buy').value,sell=el('watch-sell').value;try{await api('/api/watchlist','POST',{symbol:current.symbol,name:current.company_name,market:current.market,buy_below:buy?Number(buy):null,sell_above:sell?Number(sell):null});say(cloudMode?'관심 종목을 이 브라우저에 저장했습니다. 자동 알림은 아직 연결되지 않았습니다.':'관심 종목을 저장했습니다. 알림을 받으려면 별도 감시 프로세스가 필요합니다.');loadWatchlist();}catch(e){say(e.message,true)}});el('refresh-watch').addEventListener('click',loadWatchlist);document.querySelectorAll('.quick-picks button').forEach(btn=>btn.addEventListener('click',()=>{setSelection(btn.dataset.market,btn.dataset.symbol,btn.dataset.name);runAnalyze()}));health().then(loadWatchlist);
+el('analysis-retry').addEventListener('click',()=>runAnalyze());el('analyze-form').addEventListener('submit',e=>{e.preventDefault();runAnalyze()});el('watch-form').addEventListener('submit',async e=>{e.preventDefault();if(!current){say('먼저 종목을 분석하세요.',true);return;}const buy=el('watch-buy').value,sell=el('watch-sell').value;try{await api('/api/watchlist','POST',{symbol:current.symbol,name:current.company_name,market:current.market,buy_below:buy?Number(buy):null,sell_above:sell?Number(sell):null});say(cloudMode?'관심 목록을 이 브라우저에 저장했습니다. 감시는 매매 타이밍 알림에서 별도로 등록하세요.':'관심 목록을 저장했습니다. 감시는 매매 타이밍 알림에서 별도로 등록하세요.');loadWatchlist();}catch(e){say(e.message,true)}});el('refresh-watch').addEventListener('click',loadWatchlist);document.querySelectorAll('.quick-picks button').forEach(btn=>btn.addEventListener('click',()=>{setSelection(btn.dataset.market,btn.dataset.symbol,btn.dataset.name);runAnalyze()}));health().then(loadWatchlist);
 
 
 async function runBacktest(){
@@ -283,5 +310,5 @@ async function runBacktest(){
 }
 el('backtest-button').addEventListener('click',runBacktest);
 
-el('symbol').addEventListener('input',()=>{el('company-name').value='';});
-el('market').addEventListener('change',()=>{el('company-name').value='';});
+el('symbol').addEventListener('input',()=>{if(typeof stockSearchSelectionChanged!=='function')el('company-name').value='';});
+el('market').addEventListener('change',()=>{if(typeof stockSearchSelectionChanged!=='function')el('company-name').value='';});

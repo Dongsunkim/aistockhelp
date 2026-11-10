@@ -86,4 +86,49 @@ input,select,button{min-height:46px} .quality-panel{margin-bottom:18px;border-le
 .watch-card form label{min-width:0}
 .watch-card form input{width:100%}
 
+.stock-search-status{margin:12px 0 0;color:#376080;overflow-wrap:anywhere}
+.timing-alerts{margin:18px 0 24px;border-top:4px solid #3579b6;overflow-wrap:anywhere}
+.timing-alerts>.section-heading{align-items:flex-start;flex-wrap:wrap}
+.timing-alerts h2{font-size:24px;margin:0}
+.alert-settings>summary{cursor:pointer;font-weight:700;color:#2f6692;padding:8px 0}
+.analysis-alert-button{display:block;margin-top:18px;white-space:normal;height:auto;padding:10px 17px}
+.analysis-alert-button[hidden]{display:none}
+.monitor-badge{display:inline-flex;align-items:center;border-radius:20px;padding:5px 12px;background:#edf1f5;color:#53697b;font-size:16px;font-weight:700}
+.monitor-badge[data-state="running"]{background:#e8f5ee;color:#276a47}
+.monitor-badge[data-state="blocked"]{background:#fff4df;color:#88611e}
+.alert-selected{margin:18px 0 14px;font-weight:700;color:#365c7a}
+#alerts-form{display:grid;grid-template-columns:minmax(0,1.55fr) repeat(2,minmax(0,1fr));gap:14px;align-items:end}
+#alerts-form>label,#alerts-form fieldset{min-width:0}
+#alerts-form>.primary{grid-column:1/-1;justify-self:start;padding:0 25px}
+.alert-price-group{border:0;padding:0;margin:0}
+.alert-price-group legend{font-size:18px;font-weight:700;color:#556474;margin-bottom:7px}
+.alert-price-pair{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:7px;align-items:end}
+.alert-price-pair>span{padding-bottom:10px;color:#81909c}
+.timing-alerts input{width:100%}
+.alert-connection,.alert-history{border-top:1px solid #e5edf3;margin-top:18px;padding-top:15px}
+.alert-connection summary,.alert-history summary{cursor:pointer;color:#365c7a;font-weight:700}
+#alerts-access-form{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:14px}
+#alerts-access-form label{flex:1;min-width:200px}
+.alert-list-heading{display:flex;gap:12px;justify-content:space-between;align-items:center;margin:22px 0 12px}
+.alert-list-heading h3{margin:0}
+.alert-rules{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.alert-rule,.alert-event{border:1px solid #e2eaf1;border-radius:10px;padding:14px;min-width:0}
+.alert-rule strong,.alert-event strong{display:block;color:#294f6e}
+.alert-rule p,.alert-event p{margin:6px 0;font-size:16px;color:#536c7f}
+.alert-rule[data-state="blocked"]{background:#fffbf3}
+.alert-rule[data-state="paused"]{background:#f5f7f9}
+.alert-rule-actions{display:flex;gap:10px;margin-top:12px}
+.alert-rule-actions button{border:1px solid #d6e2eb;border-radius:7px;padding:5px 12px;color:#365c7a;background:#f6f9fc}
+.alert-event{margin-top:10px}
+.alerts-message{padding:12px 14px;border-radius:8px;background:#edf6ef;color:#326044}
+.alerts-message[data-state="error"]{background:#fff4ef;color:#9a4f3c}
+.timing-alerts button:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:760px){#alerts-form{grid-template-columns:repeat(2,minmax(0,1fr))}#alerts-form>.alert-price-group,#alerts-form>.primary{grid-column:1/-1}#alerts-form>.primary{width:100%;justify-self:stretch}.alert-rules{grid-template-columns:1fr}.timing-alerts h2{font-size:22px}.alert-rule-actions{flex-wrap:wrap}}
+.stock-search-status[data-state="error"]{color:#a04d3d}
+.stock-suggestions{list-style:none;margin:12px 0 0;padding:4px;border:1px solid #c9dae8;border-radius:9px;background:#fff;max-height:285px;overflow:auto}
+.stock-suggestions [role="option"]{padding:10px 12px;min-height:48px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.stock-suggestions [role="option"]:hover,.stock-suggestions [aria-selected="true"]{background:#eaf3fc;color:#215f94}
+.stock-suggestions small{color:#61788a;white-space:nowrap}
+@media(max-width:640px){.stock-suggestions [role="option"]{align-items:flex-start;flex-direction:column;gap:1px}.stock-suggestions small{white-space:normal}}
+
 .dart-panel{margin:18px 0 24px}.dart-panel h2{font-size:24px;margin:5px 0}.dart-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;margin:20px 0}.dart-controls button{white-space:normal;height:auto;min-height:48px}.dart-status{padding:12px;border-radius:8px;background:#eef5fb;color:#315979}.dart-results{display:grid;gap:26px}.dart-results>section{min-width:0}.dart-results .section-heading{align-items:start;flex-wrap:wrap}.dart-results .section-heading button{white-space:normal;text-align:left;font-size:18px}.dart-basis{margin:14px 0;border:1px solid #dbe5ee;border-radius:9px;padding:12px}.dart-basis>summary{font-weight:700;cursor:pointer}.dart-sheet{margin-top:12px}.dart-sheet>summary{padding:8px;background:#f3f7fb;cursor:pointer}.dart-source-note{padding:12px;margin-top:12px;background:#fff7e7;border-radius:8px}.dart-source-note p{margin:5px 0}.dart-table-wrap{overflow-x:auto;max-width:100%;margin-top:8px}.dart-table{border-collapse:collapse;width:100%;min-width:1200px;font-size:18px}.dart-table caption{text-align:left;padding:10px 0;color:#536d81}.dart-table th,.dart-table td{padding:12px;border:1px solid #dce5ed;vertical-align:top;text-align:left}.dart-table thead th{background:#edf4fa;white-space:nowrap}.dart-table tbody th{min-width:210px;font-weight:600}.dart-table td{min-width:125px}.dart-table small{display:block;color:#63788a;margin-top:7px;font-weight:400;overflow-wrap:anywhere}.dart-amount{white-space:nowrap;font-variant-numeric:tabular-nums}.dart-table a,.dart-disclosure a{color:#24699e}.dart-disclosures{max-height:650px;overflow:auto;margin:14px 0}.dart-disclosure{padding:14px 4px;border-bottom:1px solid #e4eaf0}.dart-disclosure h4{margin:0;font-size:18px}.dart-disclosure p{margin:7px 0 0;color:#667c8e;overflow-wrap:anywhere}.dart-disclosure a{text-decoration:none}.dart-disclosure a:hover{text-decoration:underline}.dart-page-actions{display:flex;gap:12px;flex-wrap:wrap}.dart-page-actions button{white-space:normal;height:auto;padding-top:8px;padding-bottom:8px}.dart-panel [role=status]{overflow-wrap:anywhere}@media(max-width:760px){.dart-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.dart-controls button{grid-column:1/-1}.dart-table{min-width:1050px}.dart-results .section-heading{flex-direction:column;gap:6px}}@media(max-width:420px){.dart-controls{grid-template-columns:1fr}}

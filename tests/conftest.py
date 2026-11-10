@@ -3,6 +3,19 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def isolated_stock_identity(monkeypatch):
+    """Provider/API regression fixtures may use synthetic tickers and labels.
+
+    Identity-specific tests restore the real resolver explicitly. All other
+    cases keep their original provider fixture without making network lookups.
+    """
+    import app
+    monkeypatch.setattr(app,'resolve_stock',lambda symbol,market,name='': {
+        'symbol':symbol,'market':market,'name':name,
+    })
+
+
+@pytest.fixture(autouse=True)
 def offline_macro_provider(monkeypatch):
     import app
     monkeypatch.setattr(app, 'fetch_macro_context', lambda: {
